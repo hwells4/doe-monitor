@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="hero">
+        <h1>Never Miss a K-12 Math Funding Opportunity</h1>
+        <p>Automated monitoring of state DoE announcements delivers funding opportunities directly to your inbox</p>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-number">${{ stats.total_funding if stats else '$47M+' }}</div>
+            <div class="stat-label">Available This Month</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.total_opportunities if stats else '23' }}</div>
+            <div class="stat-label">Active Opportunities</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ stats.states_monitored if stats else '12' }}</div>
+            <div class="stat-label">States Monitored</div>
+        </div>
+    </div>
+
+    <div class="recent-opportunities">
+        <h3>Recent Opportunities Found</h3>
+        
+        {% if opportunities %}
+            {% for opp in opportunities %}
+            <a href="{{ opp.url }}" target="_blank" class="opportunity-card">
+                <div class="opportunity-header">
+                    <div>
+                        <div class="opportunity-title">{{ opp.title }}</div>
+                        <div class="opportunity-meta">
+                            <span>📍 {{ opp.state }}</span>
+                            <span>📅 Found {{ opp.found_date }}</span>
+                            <span>⏰ Deadline: {{ opp.deadline }}</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-amount">{{ opp.amount }}</div>
+                </div>
+                <div>
+                    {% for tag in opp.tags %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                <div class="link-indicator">Click to view full details →</div>
+            </a>
+            {% endfor %}
+        {% else %}
+            <!-- Fallback demo data -->
+            <a href="https://tea.texas.gov/finance-and-grants/grants/math-achievement-grant-program" target="_blank" class="opportunity-card">
+                <div class="opportunity-header">
+                    <div>
+                        <div class="opportunity-title">Texas Mathematics Achievement Grant</div>
+                        <div class="opportunity-meta">
+                            <span>📍 Texas</span>
+                            <span>📅 Found June 24, 2025</span>
+                            <span>⏰ Deadline: July 31, 2025</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-amount">$2.4M</div>
+                </div>
+                <div>
+                    <span class="tag">K-12</span>
+                    <span class="tag">Mathematics</span>
+                    <span class="tag">Professional Development</span>
+                </div>
+                <div class="link-indicator">Click to view full details →</div>
+            </a>
+
+            <a href="https://www.cde.ca.gov/fg/fo/r12/mathprofdev25.asp" target="_blank" class="opportunity-card">
+                <div class="opportunity-header">
+                    <div>
+                        <div class="opportunity-title">California STEM Education Initiative</div>
+                        <div class="opportunity-meta">
+                            <span>📍 California</span>
+                            <span>📅 Found June 22, 2025</span>
+                            <span>⏰ Deadline: August 15, 2025</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-amount">$850K</div>
+                </div>
+                <div>
+                    <span class="tag">Middle School</span>
+                    <span class="tag">STEM</span>
+                    <span class="tag">Technology</span>
+                </div>
+                <div class="link-indicator">Click to view full details →</div>
+            </a>
+
+            <a href="https://www.fldoe.org/schools/k-12-public-schools/mathematics/" target="_blank" class="opportunity-card">
+                <div class="opportunity-header">
+                    <div>
+                        <div class="opportunity-title">Florida Mathematics Coaching Program</div>
+                        <div class="opportunity-meta">
+                            <span>📍 Florida</span>
+                            <span>📅 Found June 20, 2025</span>
+                            <span>⏰ Deadline: July 15, 2025</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-amount">$1.2M</div>
+                </div>
+                <div>
+                    <span class="tag">Elementary</span>
+                    <span class="tag">Teacher Training</span>
+                    <span class="tag">Math Coaching</span>
+                </div>
+                <div class="link-indicator">Click to view full details →</div>
+            </a>
+        {% endif %}
+    </div>
+
+    <div class="signup-section">
+        <h2>Get Instant Alerts for New Funding</h2>
+        
+        <form id="alertForm">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="kesley@rosimosi.com" required>
+            </div>
+
+            <div class="form-group">
+                <label>Alert Frequency</label>
+                <div class="frequency-options">
+                    <div class="frequency-option">
+                        <input type="radio" id="daily" name="frequency" value="daily" checked>
+                        <label for="daily">Daily</label>
+                    </div>
+                    <div class="frequency-option">
+                        <input type="radio" id="weekly" name="frequency" value="weekly">
+                        <label for="weekly">Weekly</label>
+                    </div>
+                    <div class="frequency-option">
+                        <input type="radio" id="monthly" name="frequency" value="monthly">
+                        <label for="monthly">Monthly</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>States to Monitor (select all that apply)</label>
+                <div class="states-grid">
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="TX" name="states" value="TX" checked>
+                        <label for="TX">Texas</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="CA" name="states" value="CA" checked>
+                        <label for="CA">California</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="FL" name="states" value="FL" checked>
+                        <label for="FL">Florida</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="NY" name="states" value="NY">
+                        <label for="NY">New York</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="IL" name="states" value="IL">
+                        <label for="IL">Illinois</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="PA" name="states" value="PA">
+                        <label for="PA">Pennsylvania</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="OH" name="states" value="OH">
+                        <label for="OH">Ohio</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="GA" name="states" value="GA">
+                        <label for="GA">Georgia</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="NC" name="states" value="NC">
+                        <label for="NC">North Carolina</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="MI" name="states" value="MI">
+                        <label for="MI">Michigan</label>
+                    </div>
+                    <div class="state-checkbox">
+                        <input type="checkbox" id="all" name="states" value="all">
+                        <label for="all">All States</label>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn">Start Monitoring →</button>
+            
+            <div class="success-message" id="successMessage">
+                ✅ Perfect! You'll receive your first funding alert within 24 hours.
+            </div>
+            
+            <div class="error-message" id="errorMessage">
+                ❌ Something went wrong. Please try again.
+            </div>
+        </form>
+    </div>
+
+    <div class="footer">
+        <p>Built by Harrison from Dodo Digital as a preview of our automation capabilities</p>
+        <p>No spam, no fees, just funding opportunities for eMath</p>
+    </div>
+</div>
+{% endblock %}
