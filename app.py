@@ -215,13 +215,28 @@ def subscribe():
 
 @app.route('/api/opportunities', methods=['GET'])
 def api_opportunities():
-    """Get latest funding opportunities"""
+    """Get latest funding opportunities with filtering and pagination"""
     try:
-        opportunities = get_recent_opportunities()
+        # Get query parameters
+        state = request.args.get('state', '').upper()
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', 10))
+        
+        # Get filtered opportunities
+        opportunities = get_recent_opportunities(state_filter=state, offset=offset, limit=limit)
+        
+        # Get total count for pagination
+        total_count = get_opportunities_count(state_filter=state)
+        
         return jsonify({
             'success': True,
             'opportunities': opportunities,
-            'count': len(opportunities)
+            'count': len(opportunities),
+            'total_count': total_count,
+            'offset': offset,
+            'limit': limit,
+            'has_more': offset + len(opportunities) < total_count,
+            'state_filter': state if state else 'ALL'
         })
     except Exception as e:
         logger.error(f"Error fetching opportunities: {str(e)}")
@@ -394,15 +409,66 @@ Return ONLY the JSON array, no other text."""
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'error_type': type(e).__name__}), 500
 
-# Helper functions
-def get_recent_opportunities():
-    """Get recent opportunities from database"""
+@app.route('/api/states', methods=['GET'])
+def api_states():
+    """Get available states with opportunity counts"""
     try:
         conn = sqlite3.connect('funding_monitor.db')
         c = conn.cursor()
-        c.execute('''SELECT * FROM opportunities 
-                     ORDER BY found_date DESC 
-                     LIMIT 10''')
+        c.execute('''SELECT state, COUNT(*) as count 
+                     FROM opportunities 
+                     GROUP BY state 
+                     ORDER BY state''')
+        
+        states = []
+        total_count = 0
+        for row in c.fetchall():
+            state_name = row[0]
+            count = row[1]
+            states.append({
+                'code': state_name,
+                'name': state_name,
+                'count': count
+            })
+            total_count += count
+        
+        conn.close()
+        
+        # Add "All States" option at the beginning
+        states.insert(0, {
+            'code': 'ALL',
+            'name': 'All States',
+            'count': total_count
+        })
+        
+        return jsonify({
+            'success': True,
+            'states': states
+        })
+    except Exception as e:
+        logger.error(f"Error fetching states: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Helper functions
+def get_recent_opportunities(state_filter='', offset=0, limit=10):
+    """Get recent opportunities from database with filtering and pagination"""
+    try:
+        conn = sqlite3.connect('funding_monitor.db')
+        c = conn.cursor()
+        
+        # Build query with optional state filter
+        if state_filter and state_filter != 'ALL':
+            query = '''SELECT * FROM opportunities 
+                      WHERE state = ?
+                      ORDER BY found_date DESC 
+                      LIMIT ? OFFSET ?'''
+            c.execute(query, (state_filter, limit, offset))
+        else:
+            query = '''SELECT * FROM opportunities 
+                      ORDER BY found_date DESC 
+                      LIMIT ? OFFSET ?'''
+            c.execute(query, (limit, offset))
+        
         opportunities = []
         for row in c.fetchall():
             opportunities.append({
@@ -420,6 +486,24 @@ def get_recent_opportunities():
     except Exception as e:
         logger.error(f"Error getting opportunities: {str(e)}")
         return []
+
+def get_opportunities_count(state_filter=''):
+    """Get total count of opportunities for pagination"""
+    try:
+        conn = sqlite3.connect('funding_monitor.db')
+        c = conn.cursor()
+        
+        if state_filter and state_filter != 'ALL':
+            c.execute('SELECT COUNT(*) FROM opportunities WHERE state = ?', (state_filter,))
+        else:
+            c.execute('SELECT COUNT(*) FROM opportunities')
+        
+        count = c.fetchone()[0]
+        conn.close()
+        return count
+    except Exception as e:
+        logger.error(f"Error getting opportunities count: {str(e)}")
+        return 0
 
 def get_current_stats():
     """Get current statistics"""

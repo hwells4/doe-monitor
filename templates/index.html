@@ -23,100 +23,36 @@
     </div>
 
     <div class="recent-opportunities">
-        <h3>Recent Opportunities Found</h3>
-        {% if opportunities|length == 0 %}
-        <div style="text-align: center; margin: 20px 0;">
-            <p style="color: #666; margin-bottom: 20px;">No opportunities found yet. Click below to scan state websites:</p>
-            <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
-                🔍 Scan for Opportunities Now
+        <div class="opportunities-header">
+            <h3>Recent Opportunities Found</h3>
+            <div class="filter-controls">
+                <select id="stateFilter" onchange="filterByState()">
+                    <option value="ALL">All States</option>
+                </select>
+                <span id="opportunityCount" class="count-badge">Loading...</span>
+            </div>
+        </div>
+        
+        <div id="opportunitiesContainer">
+            {% if opportunities|length == 0 %}
+            <div id="noOpportunitiesMessage" style="text-align: center; margin: 20px 0;">
+                <p style="color: #666; margin-bottom: 20px;">No opportunities found yet. Click below to scan state websites:</p>
+                <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
+                    🔍 Scan for Opportunities Now
+                </button>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div id="loadMoreContainer" style="text-align: center; margin: 20px 0; display: none;">
+            <button id="loadMoreBtn" onclick="loadMoreOpportunities()" class="submit-btn" style="width: auto; padding: 12px 30px;">
+                Load More Opportunities
             </button>
         </div>
-        {% endif %}
         
-        {% if opportunities %}
-            {% for opp in opportunities %}
-            <a href="{{ opp.url }}" target="_blank" class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">{{ opp.title }}</div>
-                        <div class="opportunity-meta">
-                            <span>📍 {{ opp.state }}</span>
-                            <span>📅 Found {{ opp.found_date }}</span>
-                            <span>⏰ Deadline: {{ opp.deadline }}</span>
-                        </div>
-                    </div>
-                    <div class="opportunity-amount">{{ opp.amount }}</div>
-                </div>
-                <div>
-                    {% for tag in opp.tags %}
-                    <span class="tag">{{ tag }}</span>
-                    {% endfor %}
-                </div>
-                <div class="link-indicator">Click to view full details →</div>
-            </a>
-            {% endfor %}
-        {% else %}
-            <!-- Fallback demo data -->
-            <a href="https://tea.texas.gov/finance-and-grants/grants/math-achievement-grant-program" target="_blank" class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">Texas Mathematics Achievement Grant</div>
-                        <div class="opportunity-meta">
-                            <span>📍 Texas</span>
-                            <span>📅 Found June 24, 2025</span>
-                            <span>⏰ Deadline: July 31, 2025</span>
-                        </div>
-                    </div>
-                    <div class="opportunity-amount">$2.4M</div>
-                </div>
-                <div>
-                    <span class="tag">K-12</span>
-                    <span class="tag">Mathematics</span>
-                    <span class="tag">Professional Development</span>
-                </div>
-                <div class="link-indicator">Click to view full details →</div>
-            </a>
-
-            <a href="https://www.cde.ca.gov/fg/fo/r12/mathprofdev25.asp" target="_blank" class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">California STEM Education Initiative</div>
-                        <div class="opportunity-meta">
-                            <span>📍 California</span>
-                            <span>📅 Found June 22, 2025</span>
-                            <span>⏰ Deadline: August 15, 2025</span>
-                        </div>
-                    </div>
-                    <div class="opportunity-amount">$850K</div>
-                </div>
-                <div>
-                    <span class="tag">Middle School</span>
-                    <span class="tag">STEM</span>
-                    <span class="tag">Technology</span>
-                </div>
-                <div class="link-indicator">Click to view full details →</div>
-            </a>
-
-            <a href="https://www.fldoe.org/schools/k-12-public-schools/mathematics/" target="_blank" class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">Florida Mathematics Coaching Program</div>
-                        <div class="opportunity-meta">
-                            <span>📍 Florida</span>
-                            <span>📅 Found June 20, 2025</span>
-                            <span>⏰ Deadline: July 15, 2025</span>
-                        </div>
-                    </div>
-                    <div class="opportunity-amount">$1.2M</div>
-                </div>
-                <div>
-                    <span class="tag">Elementary</span>
-                    <span class="tag">Teacher Training</span>
-                    <span class="tag">Math Coaching</span>
-                </div>
-                <div class="link-indicator">Click to view full details →</div>
-            </a>
-        {% endif %}
+        <div id="loadingIndicator" style="text-align: center; margin: 20px 0; display: none;">
+            <p style="color: #666;">Loading opportunities...</p>
+        </div>
     </div>
 
     <div class="signup-section">

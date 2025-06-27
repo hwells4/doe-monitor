@@ -210,10 +210,61 @@ body {
     margin: 40px 0;
 }
 
-.recent-opportunities h3 {
-    font-size: 1.8rem;
+.opportunities-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 25px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.opportunities-header h3 {
+    font-size: 1.8rem;
+    margin: 0;
     color: #333;
+}
+
+.filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+#stateFilter {
+    padding: 8px 12px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    background: white;
+    font-size: 0.9rem;
+    color: #333;
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+}
+
+#stateFilter:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.count-badge {
+    background: #667eea;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .opportunities-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .filter-controls {
+        justify-content: space-between;
+    }
 }
 
 .opportunity-card {

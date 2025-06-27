@@ -1,4 +1,10 @@
-// Handle "All States" checkbox
+// Global variables for pagination and filtering
+let currentOffset = 0;
+let currentState = 'ALL';
+let isLoading = false;
+let hasMore = true;
+
+// Handle page initialization
 document.addEventListener('DOMContentLoaded', function() {
     const allStatesCheckbox = document.getElementById('all');
     const stateCheckboxes = document.querySelectorAll('input[name="states"]:not(#all)');
@@ -25,6 +31,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (alertForm) {
         alertForm.addEventListener('submit', handleFormSubmission);
     }
+
+    // Initialize opportunities and state filter
+    loadStates();
+    loadOpportunities(true);
 });
 
 async function handleFormSubmission(e) {
@@ -140,6 +150,129 @@ function updateStatCards(stats) {
 // Update stats every 5 minutes
 setInterval(updateStats, 300000);
 
+// Load available states for filter dropdown
+async function loadStates() {
+    try {
+        const response = await fetch('/api/states');
+        const data = await response.json();
+        
+        if (data.success) {
+            const stateFilter = document.getElementById('stateFilter');
+            stateFilter.innerHTML = '';
+            
+            data.states.forEach(state => {
+                const option = document.createElement('option');
+                option.value = state.code;
+                option.textContent = `${state.name} (${state.count})`;
+                stateFilter.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading states:', error);
+    }
+}
+
+// Load opportunities with filtering and pagination
+async function loadOpportunities(reset = false) {
+    if (isLoading) return;
+    isLoading = true;
+    
+    try {
+        if (reset) {
+            currentOffset = 0;
+            document.getElementById('opportunitiesContainer').innerHTML = '';
+            document.getElementById('noOpportunitiesMessage')?.remove();
+        }
+        
+        document.getElementById('loadingIndicator').style.display = 'block';
+        
+        const url = new URL('/api/opportunities', window.location.origin);
+        url.searchParams.set('offset', currentOffset);
+        url.searchParams.set('limit', 10);
+        if (currentState && currentState !== 'ALL') {
+            url.searchParams.set('state', currentState);
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+            const container = document.getElementById('opportunitiesContainer');
+            
+            if (data.opportunities.length === 0 && currentOffset === 0) {
+                container.innerHTML = `
+                    <div id="noOpportunitiesMessage" style="text-align: center; margin: 20px 0;">
+                        <p style="color: #666; margin-bottom: 20px;">No opportunities found for the selected filter.</p>
+                        <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
+                            🔍 Scan for Opportunities Now
+                        </button>
+                    </div>
+                `;
+            } else {
+                data.opportunities.forEach(opp => {
+                    container.appendChild(createOpportunityCard(opp));
+                });
+            }
+            
+            hasMore = data.has_more;
+            currentOffset += data.count;
+            
+            // Update count badge
+            document.getElementById('opportunityCount').textContent = 
+                `${data.total_count} total`;
+            
+            // Show/hide load more button
+            const loadMoreContainer = document.getElementById('loadMoreContainer');
+            loadMoreContainer.style.display = hasMore ? 'block' : 'none';
+        }
+    } catch (error) {
+        console.error('Error loading opportunities:', error);
+    } finally {
+        isLoading = false;
+        document.getElementById('loadingIndicator').style.display = 'none';
+    }
+}
+
+// Create opportunity card HTML element
+function createOpportunityCard(opp) {
+    const card = document.createElement('a');
+    card.href = opp.url;
+    card.target = '_blank';
+    card.className = 'opportunity-card';
+    
+    const tagsHtml = opp.tags.map(tag => `<span class="tag">${tag}</span>`).join('');
+    
+    card.innerHTML = `
+        <div class="opportunity-header">
+            <div>
+                <div class="opportunity-title">${opp.title}</div>
+                <div class="opportunity-meta">
+                    <span>📍 ${opp.state}</span>
+                    <span>📅 Found ${opp.found_date}</span>
+                    <span>⏰ Deadline: ${opp.deadline}</span>
+                </div>
+            </div>
+            <div class="opportunity-amount">${opp.amount}</div>
+        </div>
+        <div>${tagsHtml}</div>
+        <div class="link-indicator">Click to view full details →</div>
+    `;
+    
+    return card;
+}
+
+// Handle state filter change
+function filterByState() {
+    const stateFilter = document.getElementById('stateFilter');
+    currentState = stateFilter.value;
+    loadOpportunities(true);
+}
+
+// Load more opportunities button
+function loadMoreOpportunities() {
+    loadOpportunities(false);
+}
+
 // Manual scrape function
 async function triggerScrape() {
     const button = event.target;
@@ -160,8 +293,9 @@ async function triggerScrape() {
         
         if (data.success) {
             alert(`Scan complete! Found ${data.opportunities_found} new opportunities.`);
-            // Reload page to show new opportunities
-            setTimeout(() => window.location.reload(), 1000);
+            // Reload opportunities and states
+            loadStates();
+            loadOpportunities(true);
         } else {
             alert('Error scanning websites. Please try again.');
         }
