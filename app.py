@@ -411,14 +411,18 @@ def scrape_opportunities(state_code):
         
         logger.info(f"Found {len(unique_links)} unique links for {config['name']}")
         
-        # FIXED: Much broader keyword matching - not just math/stem
-        keywords = [
-            'grant', 'grants', 'funding', 'opportunity', 'opportunities', 
-            'rfp', 'solicitation', 'application', 'apply', 'award', 'awards',
-            'competitive', 'program', 'programs', 'k-12', 'education', 
-            'school', 'district', 'teacher', 'student', 'math', 'mathematics', 
-            'stem', 'science', 'elementary', 'middle', 'high school', 'literacy',
-            'professional development', 'curriculum', 'technology', 'digital'
+        # PRECISE: Only funding-specific keywords to avoid false positives
+        funding_keywords = [
+            'grant', 'grants', 'funding', 'award', 'awards', 'rfp', 
+            'solicitation', 'application deadline', 'competitive grant',
+            'funding opportunity', 'grant opportunity', 'request for proposal'
+        ]
+        
+        # Must contain education-related terms
+        education_keywords = [
+            'k-12', 'elementary', 'middle school', 'high school', 'education',
+            'math', 'mathematics', 'stem', 'science', 'teacher', 'student',
+            'school district', 'professional development', 'curriculum'
         ]
         
         grant_related_links = []
@@ -430,12 +434,22 @@ def scrape_opportunities(state_code):
             if not text or len(text) < 5:
                 continue
             
-            # Check if grant-related (much broader matching)
+            # STRICT FILTERING: Must have BOTH funding AND education keywords
             text_lower = text.lower()
             href_lower = href.lower()
+            combined_text = f"{text_lower} {href_lower}"
             
-            if any(keyword in text_lower or keyword in href_lower for keyword in keywords):
+            # Skip social media and common false positives
+            if any(skip in combined_text for skip in ['instagram', 'facebook', 'twitter', 'youtube', 'linkedin', 'contact us', 'privacy policy', 'terms of use']):
+                continue
+            
+            # Must contain at least one funding keyword AND one education keyword
+            has_funding = any(keyword in combined_text for keyword in funding_keywords)
+            has_education = any(keyword in combined_text for keyword in education_keywords)
+            
+            if has_funding and has_education:
                 grant_related_links.append(link)
+                logger.info(f"Found relevant opportunity: {text[:50]}...")
         
         logger.info(f"Found {len(grant_related_links)} grant-related links for {config['name']}")
         
