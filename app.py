@@ -142,6 +142,58 @@ STATE_CONFIGS = {
         'url': 'https://www.michigan.gov/mde/services/grants',
         'selectors': ['.page-content a', 'main a', '.content a'],
         'status': 'needs_verification'
+    },
+    'VA': {
+        'name': 'Virginia',
+        'url': 'https://www.doe.virginia.gov/parents-students/for-parents/k-12-learning-acceleration-grants',
+        'selectors': ['main a', '.content a', 'article a'],
+        'source_type': 'direct_crawl',
+        'status': 'active'
+    },
+    'CO': {
+        'name': 'Colorado',
+        'url': 'https://www.cde.state.co.us/cdeawards/grants',
+        'selectors': ['.content a', 'main a', '.grants-list a'],
+        'source_type': 'direct_crawl',
+        'status': 'active'
+    },
+    'OR': {
+        'name': 'Oregon',
+        'url': 'https://www.oregon.gov/ode/schools-and-districts/grants/pages/k-12-school-funding-information.aspx',
+        'selectors': ['.content a', 'main a', '.grant-links a'],
+        'source_type': 'direct_crawl',
+        'status': 'active'
+    },
+    'AZ': {
+        'name': 'Arizona',
+        'url': 'https://www.azed.gov/grants/',
+        'selectors': ['.content a', 'main a', '.grant-opportunities a'],
+        'source_type': 'direct_crawl',
+        'status': 'needs_verification'
+    },
+    'WA': {
+        'name': 'Washington',
+        'url': 'https://www.k12.wa.us/about-ospi/grants-contracts',
+        'selectors': ['.content a', 'main a', '.grants-list a'],
+        'source_type': 'direct_crawl',
+        'status': 'needs_verification'
+    },
+    # Federal sources
+    'FEDERAL_ED': {
+        'name': 'U.S. Department of Education',
+        'url': 'https://www.ed.gov/grants-and-programs/apply-grant/available-grants',
+        'selectors': ['.grant-listing a', 'main a', '.available-grants a'],
+        'source_type': 'federal',
+        'status': 'active',
+        'note': 'Federal education grants - typically larger amounts'
+    },
+    'GRANTS_GOV': {
+        'name': 'Grants.gov Education',
+        'url': 'https://www.grants.gov/search-grants?fundingCategories=ED',
+        'selectors': ['.grant-listing a', '.results a', '.opportunity-link'],
+        'source_type': 'federal',
+        'status': 'active',
+        'note': 'All federal grants portal'
     }
 }
 
@@ -154,7 +206,10 @@ def init_db():
                  (email TEXT PRIMARY KEY, frequency TEXT, states TEXT, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS opportunities
                  (id TEXT PRIMARY KEY, title TEXT, state TEXT, amount TEXT, 
-                  deadline TEXT, url TEXT, tags TEXT, found_date TEXT)''')
+                  deadline TEXT, url TEXT, tags TEXT, found_date TEXT,
+                  eligibility TEXT, description TEXT, contact_info TEXT,
+                  source_type TEXT, quality_score REAL, application_process TEXT,
+                  source_reliability TEXT)''')
     conn.commit()
     conn.close()
 
@@ -485,7 +540,14 @@ def get_recent_opportunities(state_filter='', offset=0, limit=10):
                 'deadline': row[4],
                 'url': row[5],
                 'tags': json.loads(row[6]) if row[6] else [],
-                'found_date': format_date(row[7])
+                'found_date': format_date(row[7]),
+                'eligibility': row[8] if len(row) > 8 else '',
+                'description': row[9] if len(row) > 9 else '',
+                'contact_info': row[10] if len(row) > 10 else '',
+                'source_type': row[11] if len(row) > 11 else 'unknown',
+                'quality_score': row[12] if len(row) > 12 else 5.0,
+                'application_process': row[13] if len(row) > 13 else '',
+                'source_reliability': row[14] if len(row) > 14 else 'medium'
             })
         conn.close()
         return opportunities
@@ -907,6 +969,153 @@ def scrape_opportunities(state_code):
 
 # AI-POWERED SCRAPING FUNCTIONS
 
+def crawl_official_sources(state_code):
+    """NEW: Crawl official DoE sources using Firecrawl for reliable opportunities"""
+    if state_code not in STATE_CONFIGS:
+        logger.error(f"State {state_code} not in configuration")
+        return []
+    
+    config = STATE_CONFIGS[state_code]
+    state_name = config['name']
+    
+    # Skip inactive sources
+    if config.get('status') == 'inactive':
+        logger.info(f"Skipping inactive source: {state_name}")
+        return []
+    
+    logger.info(f"Crawling official source for {state_name}: {config['url']}")
+    
+    opportunities = []
+    
+    # Use Firecrawl for reliable content extraction
+    if firecrawl_app:
+        opportunities = firecrawl_crawl_source(config, state_code)
+    else:
+        logger.warning(f"Firecrawl not available, falling back to AI discovery for {state_name}")
+        opportunities = discover_opportunities_with_perplexity(state_name, state_code)
+    
+    return opportunities
+
+def firecrawl_crawl_source(config, state_code):
+    """Use Firecrawl to extract opportunities from official source"""
+    state_name = config['name']
+    url = config['url']
+    
+    try:
+        logger.info(f"Firecrawl scraping {state_name} source: {url}")
+        
+        # Scrape the main grants page
+        result = firecrawl_app.scrape_url(
+            url,
+            formats=['markdown', 'html']
+        )
+        
+        if not result or not result.get('markdown'):
+            logger.warning(f"Firecrawl returned empty result for {state_name}")
+            return []
+        
+        content = result['markdown']
+        logger.info(f"Retrieved {len(content)} characters from {state_name}")
+        
+        # Extract grant opportunities from the content
+        opportunities = extract_opportunities_from_content(content, config, state_code)
+        
+        # Enhance each opportunity with detailed info
+        enhanced_opportunities = []
+        for opp in opportunities:
+            if opp.get('url'):
+                enhanced_opp = enhance_opportunity_with_firecrawl(opp)
+                enhanced_opportunities.append(enhanced_opp)
+            else:
+                enhanced_opportunities.append(opp)
+        
+        logger.info(f"Firecrawl found {len(enhanced_opportunities)} opportunities for {state_name}")
+        return enhanced_opportunities
+        
+    except Exception as e:
+        logger.error(f"Firecrawl error for {state_name}: {str(e)}")
+        return []
+
+def extract_opportunities_from_content(content, config, state_code):
+    """Extract structured opportunity data from scraped content"""
+    state_name = config['name']
+    opportunities = []
+    
+    # Look for grant-related patterns in the content
+    grant_patterns = [
+        r'(?i)([^\.]+(?:grant|funding|award|rfp|solicitation)[^\.]{10,100})',
+        r'(?i)(application\s+for[^\.]{20,100})',
+        r'(?i)([^\.]*\$[\d,]+[^\.]{10,100})',
+    ]
+    
+    # Extract URLs from content (look for grant-related links)
+    url_patterns = [
+        r'(https?://[^\s\)]+(?:grant|funding|award|application|rfp)[^\s\)]*)',
+        r'(https?://[^\s\)]+\.(?:pdf|html|aspx)[^\s\)]*)'
+    ]
+    
+    found_urls = set()
+    for pattern in url_patterns:
+        matches = re.findall(pattern, content, re.IGNORECASE)
+        found_urls.update(matches)
+    
+    # For each URL, try to extract opportunity info
+    for url in list(found_urls)[:10]:  # Limit to 10 URLs to avoid overwhelming
+        # Extract title from surrounding context
+        title = extract_title_near_url(content, url)
+        
+        if not title:
+            continue
+            
+        # Apply quality filters
+        if not is_high_quality_opportunity(title, url, "TBD", "TBD"):
+            continue
+        
+        opportunity = {
+            'id': f"{state_code}_firecrawl_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+            'title': title,
+            'state': state_name,
+            'amount': 'TBD',
+            'deadline': 'TBD',
+            'url': url,
+            'tags': ['K-12', 'Education', 'Official-Source'],
+            'found_date': datetime.now().isoformat(),
+            'source': 'firecrawl',
+            'source_type': config.get('source_type', 'state'),
+            'raw_extract': True  # Flag for later enhancement
+        }
+        
+        opportunities.append(opportunity)
+    
+    return opportunities
+
+def extract_title_near_url(content, url):
+    """Extract a likely title from text near the URL"""
+    # Find the URL in content and get surrounding text
+    url_index = content.find(url)
+    if url_index == -1:
+        return None
+    
+    # Get text before the URL (likely title)
+    start = max(0, url_index - 200)
+    before_text = content[start:url_index]
+    
+    # Look for title patterns
+    title_patterns = [
+        r'(?i)([^\.]+(?:grant|funding|award|program|initiative)[^\.]*)',
+        r'(?i)(\b[A-Z][^\.]{10,80})',  # Capitalized phrases
+        r'(?i)(application\s+for[^\.]+)',
+    ]
+    
+    for pattern in title_patterns:
+        matches = re.findall(pattern, before_text)
+        if matches:
+            title = matches[-1].strip()  # Take the last (closest) match
+            if len(title) > 10 and len(title) < 100:
+                return title
+    
+    return None
+
 def discover_opportunities_with_perplexity(state_name, state_code):
     """Use Perplexity AI to discover current funding opportunities"""
     if not perplexity_client:
@@ -1207,6 +1416,72 @@ def enhance_opportunity_with_firecrawl(opportunity):
                         opportunity['amount'] = amount
                         break
             
+            # Extract professional details
+            
+            # Extract eligibility information
+            eligibility_patterns = [
+                r'eligib(?:le|ility)[:\s]*([^\.]{20,200})',
+                r'who\s+can\s+apply[:\s]*([^\.]{20,200})',
+                r'applicant[s]?\s+must[:\s]*([^\.]{20,200})',
+                r'requirements[:\s]*([^\.]{20,200})'
+            ]
+            
+            for pattern in eligibility_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    eligibility = match.group(1).strip()
+                    if len(eligibility) > 20:
+                        opportunity['eligibility'] = eligibility[:300]
+                        break
+            
+            # Extract description
+            description_patterns = [
+                r'description[:\s]*([^\.]{30,300})',
+                r'program\s+overview[:\s]*([^\.]{30,300})',
+                r'purpose[:\s]*([^\.]{30,300})',
+                r'summary[:\s]*([^\.]{30,300})'
+            ]
+            
+            for pattern in description_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    description = match.group(1).strip()
+                    if len(description) > 30:
+                        opportunity['description'] = description[:500]
+                        break
+            
+            # Extract contact information
+            contact_patterns = [
+                r'contact[:\s]*([^\.]{10,100})',
+                r'questions[:\s]*([^\.]{10,100})',
+                r'email[:\s]*([^\s]+@[^\s]+)',
+                r'phone[:\s]*([0-9\-\(\)\s]{10,20})'
+            ]
+            
+            for pattern in contact_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    contact = match.group(1).strip()
+                    if len(contact) > 5:
+                        opportunity['contact_info'] = contact[:200]
+                        break
+            
+            # Extract application process
+            process_patterns = [
+                r'how\s+to\s+apply[:\s]*([^\.]{20,200})',
+                r'application\s+process[:\s]*([^\.]{20,200})',
+                r'to\s+apply[:\s]*([^\.]{20,200})',
+                r'submit[:\s]*([^\.]{20,200})'
+            ]
+            
+            for pattern in process_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    process = match.group(1).strip()
+                    if len(process) > 20:
+                        opportunity['application_process'] = process[:300]
+                        break
+            
             # Extract better description/tags from content
             if 'math' in content.lower() or 'mathematics' in content.lower():
                 if 'Mathematics' not in opportunity.get('tags', []):
@@ -1215,6 +1490,21 @@ def enhance_opportunity_with_firecrawl(opportunity):
             if 'stem' in content.lower():
                 if 'STEM' not in opportunity.get('tags', []):
                     opportunity['tags'].append('STEM')
+            
+            # Set source reliability and quality score
+            if opportunity.get('source_type') == 'federal':
+                opportunity['source_reliability'] = 'high'
+                opportunity['quality_score'] = 8.0
+            elif opportunity.get('source_type') == 'state':
+                opportunity['source_reliability'] = 'high'
+                opportunity['quality_score'] = 7.0
+            else:
+                opportunity['source_reliability'] = 'medium'
+                opportunity['quality_score'] = 6.0
+            
+            # Increase quality score if we found detailed info
+            if opportunity.get('eligibility') and opportunity.get('description'):
+                opportunity['quality_score'] = min(10.0, opportunity.get('quality_score', 5.0) + 1.5)
                     
             logger.info(f"Enhanced opportunity with Firecrawl: {opportunity['title'][:50]}")
             
@@ -1234,18 +1524,18 @@ def ai_powered_scrape_opportunities(state_code):
     
     logger.info(f"Starting AI-powered discovery for {state_name}")
     
-    # Step 1: Use Perplexity to discover opportunities
-    opportunities = discover_opportunities_with_perplexity(state_name, state_code)
+    # Step 1: Use Firecrawl to crawl official sources (with Perplexity fallback)
+    opportunities = crawl_official_sources(state_code)
     
     if not opportunities:
-        logger.warning(f"No opportunities with valid URLs discovered by Perplexity for {state_name}")
-        logger.info(f"Attempting traditional scraping as fallback for {state_name}")
+        logger.warning(f"Official source crawling found no opportunities for {state_name}")
+        logger.info(f"Attempting traditional scraping as final fallback for {state_name}")
         # Fallback to traditional scraping for this state
         opportunities = scrape_opportunities(state_code)
         if opportunities:
             logger.info(f"Traditional scraping found {len(opportunities)} opportunities for {state_name}")
         else:
-            logger.warning(f"Both AI and traditional scraping failed for {state_name}")
+            logger.warning(f"All discovery methods failed for {state_name}")
             return []
     
     # Step 2: Enhance each opportunity with Firecrawl (if URL available)
@@ -1283,11 +1573,16 @@ def check_all_states():
                 # New opportunity!
                 new_opportunities.append(opp)
                 c.execute('''INSERT INTO opportunities 
-                            (id, title, state, amount, deadline, url, tags, found_date)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (id, title, state, amount, deadline, url, tags, found_date,
+                             eligibility, description, contact_info, source_type, 
+                             quality_score, application_process, source_reliability)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                          (opp['id'], opp['title'], opp['state'], opp['amount'],
                           opp['deadline'], opp['url'], json.dumps(opp['tags']), 
-                          opp['found_date']))
+                          opp['found_date'], opp.get('eligibility', ''),
+                          opp.get('description', ''), opp.get('contact_info', ''),
+                          opp.get('source_type', 'unknown'), opp.get('quality_score', 5.0),
+                          opp.get('application_process', ''), opp.get('source_reliability', 'medium')))
     
     conn.commit()
     conn.close()
