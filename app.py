@@ -419,18 +419,21 @@ def clean_extracted_url(url):
     if not url:
         return ''
     
-    # Remove common trailing artifacts
-    url = re.sub(r'[\)\]\}\.,:;!?]*$', '', url.strip())
+    # Remove common trailing artifacts step by step
+    url = url.strip()
     
     # Remove markdown link artifacts like [1], [2] etc.
     url = re.sub(r'\[\d+\]\.?$', '', url)
     
-    # Remove trailing periods and other punctuation
-    url = url.rstrip('.,;:!?)\]}')
+    # Remove trailing punctuation and brackets
+    url = re.sub(r'[\)\]\}\.,:;!?]+$', '', url)
+    
+    # Remove any remaining trailing whitespace
+    url = url.strip()
     
     # Validate URL format
     if url and url.startswith('http') and len(url) > 10:
-        # Basic URL validation
+        # Basic URL validation - must have a domain with TLD
         if re.match(r'https?://[^\s<>"]+\.[a-zA-Z]{2,}', url):
             return url
     
@@ -440,24 +443,24 @@ def extract_urls_from_text(text):
     """Extract and clean URLs from text with improved patterns"""
     urls = set()  # Use set to avoid duplicates
     
-    # Multiple URL extraction patterns
+    # Multiple URL extraction patterns in order of preference
     url_patterns = [
-        # Standard URLs
-        r'https?://[^\s<>"\]\)]+',
-        # Markdown links [text](url)
-        r'\[([^\]]+)\]\((https?://[^\)]+)\)',
-        # URLs in parentheses
-        r'\((https?://[^\)]+)\)',
+        # Markdown links [text](url) - highest priority
+        (r'\[([^\]]+)\]\((https?://[^\)\s]+)\)', 2),
         # URLs after common prefixes
-        r'(?:URL|Link|Website|Source):\s*(https?://[^\s<>"\]\)]+)',
+        (r'(?:URL|Link|Website|Source):\s*(https?://[^\s<>"\]\)]+)', 1),
+        # URLs in parentheses (but not markdown links)
+        (r'(?<!\])\((https?://[^\)\s]+)\)', 1),
+        # Standard URLs in text
+        (r'(?:^|\s)(https?://[^\s<>"\]\)]+)', 1),
     ]
     
-    for pattern in url_patterns:
+    for pattern, group_index in url_patterns:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
             if isinstance(match, tuple):
                 # Take the URL part from tuple matches
-                url = match[1] if len(match) > 1 and match[1] else match[0]
+                url = match[group_index - 1] if len(match) >= group_index else match[0]
             else:
                 url = match
             
