@@ -13,6 +13,8 @@ import sqlite3
 import re
 import logging
 from dotenv import load_dotenv
+from openai import OpenAI
+from firecrawl import FirecrawlApp
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +36,23 @@ EMAIL_CONFIG = {
     'sender_email': os.environ.get('SENDER_EMAIL', ''),
     'sender_password': os.environ.get('SENDER_PASSWORD', '')
 }
+
+# AI Services Configuration
+PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY', '')
+FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
+
+# Initialize AI clients
+perplexity_client = None
+firecrawl_app = None
+
+if PERPLEXITY_API_KEY:
+    perplexity_client = OpenAI(
+        api_key=PERPLEXITY_API_KEY,
+        base_url="https://api.perplexity.ai"
+    )
+
+if FIRECRAWL_API_KEY:
+    firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
 
 # State DoE configurations - FIXED based on actual site analysis
 STATE_CONFIGS = {
@@ -224,6 +243,42 @@ def manual_scrape():
         })
     except Exception as e:
         logger.error(f"Manual scrape error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/scrape/ai/<state_code>', methods=['POST'])
+def test_ai_scrape(state_code):
+    """Test AI-powered scraping for a specific state"""
+    try:
+        if not perplexity_client or not firecrawl_app:
+            return jsonify({
+                'success': False,
+                'error': 'AI services not configured. Please set PERPLEXITY_API_KEY and FIRECRAWL_API_KEY environment variables.'
+            }), 400
+        
+        if state_code.upper() not in STATE_CONFIGS:
+            return jsonify({
+                'success': False,
+                'error': f'State {state_code} not supported. Available: {list(STATE_CONFIGS.keys())}'
+            }), 400
+        
+        opportunities = ai_powered_scrape_opportunities(state_code.upper())
+        
+        return jsonify({
+            'success': True,
+            'message': f'AI scraping complete for {STATE_CONFIGS[state_code.upper()]["name"]}',
+            'opportunities_found': len(opportunities),
+            'opportunities': opportunities[:3],  # Return first 3 for preview
+            'ai_services': {
+                'perplexity_enabled': bool(perplexity_client),
+                'firecrawl_enabled': bool(firecrawl_app)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"AI scrape test error for {state_code}: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -510,6 +565,216 @@ def scrape_opportunities(state_code):
     
     return opportunities
 
+# AI-POWERED SCRAPING FUNCTIONS
+
+def discover_opportunities_with_perplexity(state_name, state_code):
+    """Use Perplexity AI to discover current funding opportunities"""
+    if not perplexity_client:
+        logger.warning("Perplexity API not configured, skipping AI discovery")
+        return []
+    
+    try:
+        # Craft a specific query for current funding opportunities
+        query = f"""Find current K-12 education funding opportunities, grants, and RFPs available in {state_name} for 2025. 
+        Include:
+        - Grant names and titles
+        - Application deadlines  
+        - Funding amounts
+        - Official website URLs from {state_name} Department of Education
+        - Math, STEM, and general education grants
+        
+        Focus on opportunities that are currently open or opening soon. Provide specific URLs when available."""
+        
+        logger.info(f"Querying Perplexity for {state_name} opportunities...")
+        
+        response = perplexity_client.chat.completions.create(
+            model="llama-3.1-sonar-large-128k-online",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are an expert research assistant specializing in education funding opportunities. Provide accurate, current information with specific details and official URLs."
+                },
+                {
+                    "role": "user", 
+                    "content": query
+                }
+            ],
+            temperature=0.1,
+            max_tokens=2000
+        )
+        
+        ai_response = response.choices[0].message.content
+        logger.info(f"Perplexity found opportunities for {state_name}")
+        
+        # Parse the AI response to extract structured opportunity data
+        opportunities = parse_perplexity_response(ai_response, state_name, state_code)
+        
+        return opportunities
+        
+    except Exception as e:
+        logger.error(f"Perplexity discovery error for {state_name}: {str(e)}")
+        return []
+
+def parse_perplexity_response(ai_response, state_name, state_code):
+    """Parse Perplexity response to extract structured opportunity data"""
+    opportunities = []
+    
+    try:
+        # Look for URLs in the response
+        urls = re.findall(r'https?://[^\s<>"]+', ai_response)
+        
+        # Split response into potential opportunity sections
+        sections = ai_response.split('\n\n')
+        
+        for i, section in enumerate(sections):
+            if len(section.strip()) < 20:  # Skip very short sections
+                continue
+                
+            # Look for grant/funding indicators
+            if any(keyword in section.lower() for keyword in ['grant', 'funding', 'opportunity', 'rfp', 'application']):
+                
+                # Extract title (usually first line or after bullets/numbers)
+                lines = section.strip().split('\n')
+                title = lines[0].strip()
+                
+                # Clean up title
+                title = re.sub(r'^[\d\.\-\*\•\s]+', '', title)  # Remove bullets/numbers
+                title = title[:100] if len(title) > 100 else title  # Limit length
+                
+                # Look for deadline in this section
+                deadline = 'Check website'
+                deadline_match = re.search(r'deadline[:\s]*([^\.]+)', section, re.IGNORECASE)
+                if deadline_match:
+                    deadline = deadline_match.group(1).strip()[:50]
+                
+                # Look for amount in this section  
+                amount = 'Amount TBD'
+                amount_match = re.search(r'\$[\d,]+(?:\.\d+)?(?:\s*[KMB])?', section)
+                if amount_match:
+                    amount = amount_match.group(0)
+                
+                # Try to find relevant URL for this opportunity
+                url = ''
+                if i < len(urls):
+                    url = urls[i] if i < len(urls) else (urls[0] if urls else '')
+                
+                if title and len(title) > 10:  # Only include if we have a reasonable title
+                    opportunity = {
+                        'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                        'title': title,
+                        'state': state_name,
+                        'amount': amount,
+                        'deadline': deadline,
+                        'url': url,
+                        'tags': ['K-12', 'Education', 'AI-Discovered'],
+                        'found_date': datetime.now().isoformat(),
+                        'source': 'perplexity'
+                    }
+                    opportunities.append(opportunity)
+                    
+        logger.info(f"Parsed {len(opportunities)} opportunities from Perplexity response for {state_name}")
+        return opportunities[:5]  # Limit to top 5 opportunities per state
+        
+    except Exception as e:
+        logger.error(f"Error parsing Perplexity response for {state_name}: {str(e)}")
+        return []
+
+def enhance_opportunity_with_firecrawl(opportunity):
+    """Use Firecrawl to extract detailed information from opportunity URL"""
+    if not firecrawl_app or not opportunity.get('url'):
+        return opportunity
+    
+    try:
+        logger.info(f"Enhancing opportunity with Firecrawl: {opportunity['title'][:50]}...")
+        
+        # Use Firecrawl to scrape the URL and extract structured data
+        result = firecrawl_app.scrape_url(
+            opportunity['url'], 
+            params={
+                'formats': ['markdown', 'html'],
+                'includeTags': ['h1', 'h2', 'h3', 'p', 'li', 'strong'],
+                'excludeTags': ['nav', 'footer', 'header', 'script', 'style'],
+                'waitFor': 2000
+            }
+        )
+        
+        if result and result.get('markdown'):
+            content = result['markdown']
+            
+            # Extract better deadline information
+            deadline_patterns = [
+                r'deadline[:\s]*([^\.]+)',
+                r'due[:\s]*([^\.]+)', 
+                r'submit[:\s]*by[:\s]*([^\.]+)',
+                r'application[:\s]*due[:\s]*([^\.]+)'
+            ]
+            
+            for pattern in deadline_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    deadline = match.group(1).strip()[:100]
+                    if deadline and deadline != 'Check website':
+                        opportunity['deadline'] = deadline
+                        break
+            
+            # Extract better funding amount
+            amount_patterns = [
+                r'award[:\s]*\$?([\d,]+(?:\.\d+)?(?:\s*[KMBkmb]illion)?)',
+                r'funding[:\s]*\$?([\d,]+(?:\.\d+)?(?:\s*[KMBkmb]illion)?)',
+                r'up\s*to[:\s]*\$?([\d,]+(?:\.\d+)?(?:\s*[KMBkmb]illion)?)'
+            ]
+            
+            for pattern in amount_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    amount = f"${match.group(1)}"
+                    if amount != opportunity.get('amount'):
+                        opportunity['amount'] = amount
+                        break
+            
+            # Extract better description/tags from content
+            if 'math' in content.lower() or 'mathematics' in content.lower():
+                if 'Mathematics' not in opportunity.get('tags', []):
+                    opportunity['tags'].append('Mathematics')
+            
+            if 'stem' in content.lower():
+                if 'STEM' not in opportunity.get('tags', []):
+                    opportunity['tags'].append('STEM')
+                    
+            logger.info(f"Enhanced opportunity with Firecrawl: {opportunity['title'][:50]}")
+            
+        return opportunity
+        
+    except Exception as e:
+        logger.error(f"Firecrawl enhancement error for {opportunity.get('title', 'Unknown')}: {str(e)}")
+        return opportunity
+
+def ai_powered_scrape_opportunities(state_code):
+    """Hybrid AI-powered opportunity discovery using Perplexity + Firecrawl"""
+    if state_code not in STATE_CONFIGS:
+        return []
+    
+    config = STATE_CONFIGS[state_code]
+    state_name = config['name']
+    
+    logger.info(f"Starting AI-powered discovery for {state_name}")
+    
+    # Step 1: Use Perplexity to discover opportunities
+    opportunities = discover_opportunities_with_perplexity(state_name, state_code)
+    
+    if not opportunities:
+        logger.warning(f"No opportunities discovered by Perplexity for {state_name}")
+        return []
+    
+    # Step 2: Enhance each opportunity with Firecrawl (if URL available)
+    enhanced_opportunities = []
+    for opp in opportunities:
+        enhanced_opp = enhance_opportunity_with_firecrawl(opp)
+        enhanced_opportunities.append(enhanced_opp)
+    
+    logger.info(f"AI-powered discovery complete for {state_name}: {len(enhanced_opportunities)} opportunities")
+    return enhanced_opportunities
+
 def check_all_states():
     """Check all states for new opportunities"""
     logger.info(f"Checking for new opportunities at {datetime.now()}")
@@ -519,7 +784,15 @@ def check_all_states():
     c = conn.cursor()
     
     for state_code in STATE_CONFIGS:
-        opportunities = scrape_opportunities(state_code)
+        # Try AI-powered scraping first, fallback to traditional scraping
+        if perplexity_client and firecrawl_app:
+            opportunities = ai_powered_scrape_opportunities(state_code)
+            if not opportunities:
+                logger.info(f"AI scraping failed for {state_code}, falling back to traditional scraping")
+                opportunities = scrape_opportunities(state_code)
+        else:
+            logger.info(f"AI services not configured, using traditional scraping for {state_code}")
+            opportunities = scrape_opportunities(state_code)
         
         for opp in opportunities:
             # Check if already exists
