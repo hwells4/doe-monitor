@@ -327,6 +327,73 @@ def test_ai_scrape(state_code):
             'error': str(e)
         }), 500
 
+@app.route('/api/debug/perplexity/<state_code>', methods=['GET'])
+def debug_perplexity(state_code):
+    """Debug endpoint to see raw Perplexity response"""
+    if state_code.upper() not in STATE_CONFIGS:
+        return jsonify({'success': False, 'error': 'Invalid state code'}), 400
+    
+    if not perplexity_client:
+        return jsonify({'success': False, 'error': 'Perplexity client not configured'}), 500
+    
+    try:
+        config = STATE_CONFIGS[state_code.upper()]
+        state_name = config['name']
+        
+        # Same query as the main function
+        query = f"""Find current K-12 education funding opportunities, grants, and RFPs available in {state_name} for 2025. 
+
+Return ONLY a JSON array of opportunities in this exact format:
+[
+  {{
+    "title": "Exact grant name",
+    "amount": "Funding amount or TBD",
+    "deadline": "Application deadline or TBD", 
+    "url": "Direct link to grant application or info page"
+  }}
+]
+
+Requirements:
+- Find 3-5 current opportunities for Math, STEM, or general K-12 education
+- Each URL must be a direct, working link to the grant information
+- Focus on {state_name} Department of Education or state agency grants
+- Only include opportunities that are currently open or opening soon
+
+Return ONLY the JSON array, no other text."""
+        
+        # Make the API call
+        if hasattr(perplexity_client, 'chat') and hasattr(perplexity_client.chat, 'completions'):
+            response = perplexity_client.chat.completions.create(
+                model="llama-3.1-sonar-large-128k-online",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a research assistant that finds funding opportunities. Always respond with valid JSON only. Never include explanatory text, just the JSON array."
+                    },
+                    {
+                        "role": "user", 
+                        "content": query
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            ai_response = response.choices[0].message.content
+            
+            return jsonify({
+                'success': True,
+                'state': state_name,
+                'query': query,
+                'raw_response': ai_response,
+                'response_length': len(ai_response),
+                'client_type': 'OpenAI'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Unexpected client type'})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'error_type': type(e).__name__}), 500
+
 # Helper functions
 def get_recent_opportunities():
     """Get recent opportunities from database"""
