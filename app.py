@@ -30,6 +30,12 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Database configuration - use Railway's persistent volume
+DATABASE_DIR = os.environ.get('DATABASE_DIR', '/data' if os.environ.get('RAILWAY_ENVIRONMENT') else '.')
+os.makedirs(DATABASE_DIR, exist_ok=True)
+DATABASE_PATH = os.path.join(DATABASE_DIR, 'funding_monitor.db')
+logger.info(f"Using database at: {DATABASE_PATH}")
+
 # Initialize scheduler for automated checks
 scheduler = BackgroundScheduler()
 
@@ -142,7 +148,7 @@ STATE_CONFIGS = {
 # Database setup
 def init_db():
     """Initialize the database with required tables"""
-    conn = sqlite3.connect('funding_monitor.db')
+    conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS subscribers
                  (email TEXT PRIMARY KEY, frequency TEXT, states TEXT, created_at TEXT)''')
@@ -187,7 +193,7 @@ def subscribe():
             return jsonify({'success': False, 'error': 'Please select at least one state'}), 400
         
         # Save to database
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         c.execute('''INSERT OR REPLACE INTO subscribers (email, frequency, states, created_at)
                      VALUES (?, ?, ?, ?)''',
@@ -413,7 +419,7 @@ Return ONLY the JSON array, no other text."""
 def api_states():
     """Get available states with opportunity counts"""
     try:
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         c.execute('''SELECT state, COUNT(*) as count 
                      FROM opportunities 
@@ -453,7 +459,7 @@ def api_states():
 def get_recent_opportunities(state_filter='', offset=0, limit=10):
     """Get recent opportunities from database with filtering and pagination"""
     try:
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         
         # Build query with optional state filter
@@ -490,7 +496,7 @@ def get_recent_opportunities(state_filter='', offset=0, limit=10):
 def get_opportunities_count(state_filter=''):
     """Get total count of opportunities for pagination"""
     try:
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         
         if state_filter and state_filter != 'ALL':
@@ -508,7 +514,7 @@ def get_opportunities_count(state_filter=''):
 def get_current_stats():
     """Get current statistics"""
     try:
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         
         # Count opportunities
@@ -547,7 +553,7 @@ def get_current_stats():
 def check_database_health():
     """Check if database is accessible"""
     try:
-        conn = sqlite3.connect('funding_monitor.db')
+        conn = sqlite3.connect(DATABASE_PATH)
         c = conn.cursor()
         c.execute('SELECT COUNT(*) FROM subscribers')
         conn.close()
@@ -1190,7 +1196,7 @@ def check_all_states():
     logger.info(f"Checking for new opportunities at {datetime.now()}")
     new_opportunities = []
     
-    conn = sqlite3.connect('funding_monitor.db')
+    conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     
     for state_code in STATE_CONFIGS:
@@ -1232,7 +1238,7 @@ def send_alerts(opportunities):
         logger.warning("Email not configured, skipping alerts")
         return
     
-    conn = sqlite3.connect('funding_monitor.db')
+    conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     c.execute('SELECT email, frequency, states FROM subscribers')
     

@@ -6,3 +6,6 @@ healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+[mounts]
+"/data" = { volume = "doe-monitor-data" }
