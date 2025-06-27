@@ -678,6 +678,58 @@ def extract_dollar_amount(text):
         return amount
     return None
 
+def is_high_quality_opportunity(title, url, amount, deadline):
+    """Filter out low-quality opportunities that aren't actionable"""
+    
+    # Red flags in title (budget documents, summaries, etc.)
+    title_lower = title.lower()
+    red_flag_terms = [
+        'budget', 'summary', 'legislative', 'archive', 'report', 'overview',
+        'analysis', 'appropriation', 'bill', 'legislation', 'hearing',
+        'committee', 'minutes', 'agenda', 'presentation', 'slides'
+    ]
+    
+    for term in red_flag_terms:
+        if term in title_lower:
+            logger.info(f"Quality check: Rejected '{title[:50]}' - contains red flag term: '{term}'")
+            return False
+    
+    # Red flags in URL (PDFs, archives, etc.)
+    url_lower = url.lower()
+    url_red_flags = [
+        '.pdf', '/archive', '/budget', '/legislative', '/summary',
+        '/reports', '/presentations', '/minutes', '/hearing'
+    ]
+    
+    for flag in url_red_flags:
+        if flag in url_lower:
+            logger.info(f"Quality check: Rejected '{title[:50]}' - URL contains red flag: '{flag}'")
+            return False
+    
+    # Must have some indication this is actionable
+    actionable_terms = [
+        'application', 'apply', 'grant', 'rfp', 'request for proposal',
+        'funding opportunity', 'competitive', 'solicitation', 'award'
+    ]
+    
+    combined_text = f"{title_lower} {url_lower}"
+    has_actionable = any(term in combined_text for term in actionable_terms)
+    
+    if not has_actionable:
+        logger.info(f"Quality check: Rejected '{title[:50]}' - no actionable terms found")
+        return False
+    
+    # Prefer opportunities with specific amounts and deadlines
+    has_amount = amount and amount.lower() not in ['tbd', 'to be determined', 'varies']
+    has_deadline = deadline and deadline.lower() not in ['tbd', 'to be determined', 'varies']
+    
+    # At least one should be specific
+    if not has_amount and not has_deadline:
+        logger.info(f"Quality check: Warning for '{title[:50]}' - both amount and deadline are vague")
+    
+    logger.info(f"Quality check: Approved '{title[:50]}' - passed all quality filters")
+    return True
+
 def scrape_opportunities(state_code):
     """FIXED: Scrape opportunities from a state DoE site with proper selectors and error handling"""
     if state_code not in STATE_CONFIGS:
@@ -862,26 +914,35 @@ def discover_opportunities_with_perplexity(state_name, state_code):
         return []
     
     try:
-        # Craft a specific query for current funding opportunities
-        query = f"""Find current K-12 education funding opportunities, grants, and RFPs available in {state_name} for 2025. 
+        # Craft a specific query for HIGH-QUALITY, actionable funding opportunities
+        query = f"""I need current, actionable K-12 education funding opportunities that school administrators can apply for RIGHT NOW in {state_name}.
 
-Return ONLY a JSON array of opportunities in this exact format:
+CRITICAL REQUIREMENTS:
+- Must be ACTIVE grant programs with current application periods (not archived or past opportunities)
+- Must have clear application processes (not just PDFs with budget information)
+- Must be from official government sources ({state_name} Department of Education, federal agencies, or authorized state programs)
+- Must specify funding amounts and deadlines
+- Must be for K-12 mathematics, STEM education, or general school improvement
+
+EXCLUDE:
+- Budget documents, legislative summaries, or archived reports
+- Programs that are "coming soon" without application details
+- Private foundation grants (focus on government funding)
+- Programs that require pre-qualification or multi-year commitments without current openings
+
+Return ONLY opportunities that a school administrator could realistically apply for this month.
+
+Format as JSON array:
 [
   {{
-    "title": "Exact grant name",
-    "amount": "Funding amount or TBD",
-    "deadline": "Application deadline or TBD", 
-    "url": "Direct link to grant application or info page"
+    "title": "Official grant program name",
+    "amount": "Specific funding amount (e.g., '$50,000 per school')",
+    "deadline": "Exact application deadline",
+    "url": "Direct link to application page or RFP"
   }}
 ]
 
-Requirements:
-- Find 3-5 current opportunities for Math, STEM, or general K-12 education
-- Each URL must be a direct, working link to the grant information
-- Focus on {state_name} Department of Education or state agency grants
-- Only include opportunities that are currently open or opening soon
-
-Return ONLY the JSON array, no other text."""
+Focus on finding 2-3 HIGH-QUALITY opportunities rather than many low-quality ones."""
         
         logger.info(f"Querying Perplexity for {state_name} opportunities...")
         
@@ -1007,6 +1068,11 @@ def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
                 clean_url = clean_extracted_url(url)
                 if not clean_url or not clean_url.startswith('http'):
                     logger.warning(f"Skipping grant '{title[:50]}...' - invalid URL: '{url}'")
+                    continue
+                
+                # Quality validation - skip low-quality opportunities
+                if not is_high_quality_opportunity(title, clean_url, amount, deadline):
+                    logger.warning(f"Skipping low-quality grant '{title[:50]}...' - failed quality check")
                     continue
                 
                 opportunity = {
