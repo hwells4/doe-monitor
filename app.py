@@ -707,20 +707,24 @@ def discover_opportunities_with_perplexity(state_name, state_code):
     try:
         # Craft a specific query for current funding opportunities
         query = f"""Find current K-12 education funding opportunities, grants, and RFPs available in {state_name} for 2025. 
-        
-        Please format each opportunity clearly as:
-        TITLE: [exact grant name]
-        AMOUNT: [funding amount if available]  
-        DEADLINE: [application deadline if available]
-        URL: [official website link]
-        
-        Include:
-        - Grant names and titles for Math, STEM, and general K-12 education
-        - Application deadlines  
-        - Funding amounts
-        - Official website URLs from {state_name} Department of Education or state agencies
-        
-        Focus on opportunities that are currently open or opening soon in {state_name}. Provide specific, valid URLs when available."""
+
+Return ONLY a JSON array of opportunities in this exact format:
+[
+  {{
+    "title": "Exact grant name",
+    "amount": "Funding amount or TBD",
+    "deadline": "Application deadline or TBD", 
+    "url": "Direct link to grant application or info page"
+  }}
+]
+
+Requirements:
+- Find 3-5 current opportunities for Math, STEM, or general K-12 education
+- Each URL must be a direct, working link to the grant information
+- Focus on {state_name} Department of Education or state agency grants
+- Only include opportunities that are currently open or opening soon
+
+Return ONLY the JSON array, no other text."""
         
         logger.info(f"Querying Perplexity for {state_name} opportunities...")
         
@@ -732,7 +736,7 @@ def discover_opportunities_with_perplexity(state_name, state_code):
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are a helpful assistant. List specific grant programs with exact titles, amounts, deadlines, and official URLs. Format each grant clearly with: TITLE: [exact grant name], AMOUNT: [funding amount], DEADLINE: [application deadline], URL: [official website link]"
+                        "content": "You are a research assistant that finds funding opportunities. Always respond with valid JSON only. Never include explanatory text, just the JSON array."
                     },
                     {
                         "role": "user", 
@@ -776,110 +780,79 @@ def discover_opportunities_with_perplexity(state_name, state_code):
         return []
 
 def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
-    """Parse Perplexity response to extract structured opportunity data"""
+    """Parse Perplexity JSON response to extract opportunity data"""
     opportunities = []
     
     try:
-        logger.info(f"Parsing Perplexity response for {state_name}. Response length: {len(ai_response)}")
-        logger.info(f"Response preview: {ai_response[:500]}...")
-        logger.info(f"Full response: {ai_response}")
-        logger.info(f"Perplexity sources provided: {len(sources)} - {sources}")
+        logger.info(f"Parsing Perplexity JSON response for {state_name}. Response length: {len(ai_response)}")
+        logger.info(f"Raw response: {ai_response}")
         
-        # First, try to parse structured format (TITLE:, AMOUNT:, etc.)
-        structured_matches = re.findall(
-            r'TITLE:\s*([^\n]+).*?AMOUNT:\s*([^\n]+).*?DEADLINE:\s*([^\n]+).*?URL:\s*([^\n]+)',
-            ai_response, re.DOTALL | re.IGNORECASE
-        )
+        # Clean up the response to extract JSON
+        json_text = ai_response.strip()
         
-        if structured_matches:
-            logger.info(f"Found {len(structured_matches)} structured grants for {state_name}")
-            for i, (title, amount, deadline, url) in enumerate(structured_matches[:5]):
-                if title and len(title.strip()) > 5:
-                    # Clean and validate URL
-                    clean_url = clean_extracted_url(url.strip())
-                    
-                    # Only add opportunities with valid URLs
-                    if clean_url and clean_url.startswith('http'):
-                        opportunity = {
-                            'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
-                            'title': title.strip(),
-                            'state': state_name,
-                            'amount': amount.strip() if amount.strip() else 'Amount TBD',
-                            'deadline': deadline.strip() if deadline.strip() else 'Check website',
-                            'url': clean_url,
-                            'tags': ['K-12', 'Education', 'AI-Discovered'],
-                            'found_date': datetime.now().isoformat(),
-                            'source': 'perplexity'
-                        }
-                        opportunities.append(opportunity)
-                        logger.info(f"Structured grant: {title[:50]}... - URL: {clean_url}")
-                    else:
-                        logger.warning(f"Skipping structured grant '{title[:50]}...' - no valid URL (URL: '{url.strip()}')")
+        # Remove any text before the JSON array
+        if '[' in json_text:
+            json_text = json_text[json_text.find('['):]
         
-        # If no structured format found, fall back to parsing
-        if not opportunities:
-            logger.info(f"No structured format, parsing unstructured response for {state_name}")
-            
-            # Combine Perplexity sources with extracted URLs, prioritizing sources
-            all_urls = []
-            
-            # First priority: Perplexity sources (these are the most reliable)
-            if sources:
-                all_urls.extend([url for url in sources if url and url.startswith('http')])
-                logger.info(f"Added {len([url for url in sources if url and url.startswith('http')])} URLs from Perplexity sources")
-            
-            # Second priority: URLs extracted from response text
-            extracted_urls = extract_urls_from_text(ai_response)
-            for url in extracted_urls:
-                if url not in all_urls:
-                    all_urls.append(url)
-            logger.info(f"Total URLs available: {len(all_urls)} (Sources: {len(sources)}, Extracted: {len(extracted_urls)})")
-            
-            # Look for grant names in the text with improved patterns
-            grant_titles = extract_grant_titles_from_text(ai_response)
-            logger.info(f"Extracted {len(grant_titles)} grant titles from response")
-            
-            # Create opportunities from found titles and URLs
-            for i, title in enumerate(grant_titles[:5]):
-                # Try to find amount in nearby text
-                amount = 'Amount TBD'
-                title_index = ai_response.find(title)
-                if title_index >= 0:
-                    nearby_text = ai_response[max(0, title_index-200):title_index+200]
-                    amount_match = re.search(r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|thousand|K))?', nearby_text)
-                    if amount_match:
-                        amount = amount_match.group(0)
+        # Remove any text after the JSON array
+        if json_text.endswith(']'):
+            # Find the last closing bracket
+            last_bracket = json_text.rfind(']')
+            json_text = json_text[:last_bracket + 1]
+        
+        logger.info(f"Cleaned JSON text: {json_text}")
+        
+        # Parse the JSON
+        try:
+            grant_data = json.loads(json_text)
+            logger.info(f"Successfully parsed JSON with {len(grant_data)} grants")
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            logger.error(f"Attempted to parse: {json_text}")
+            return []
+        
+        # Convert JSON data to opportunities
+        for i, grant in enumerate(grant_data[:5]):  # Limit to 5
+            try:
+                title = grant.get('title', '').strip()
+                amount = grant.get('amount', 'Amount TBD').strip()
+                deadline = grant.get('deadline', 'Check website').strip()
+                url = grant.get('url', '').strip()
                 
-                # Assign URL if available - prioritize Perplexity sources
-                assigned_url = ''
-                if i < len(all_urls):
-                    assigned_url = all_urls[i]
-                elif all_urls:
-                    assigned_url = all_urls[0]  # Use first URL as fallback
+                # Validate required fields
+                if not title or len(title) < 5:
+                    logger.warning(f"Skipping grant {i+1} - invalid title: '{title}'")
+                    continue
                 
-                # Only add opportunities that have valid URLs
-                if assigned_url and assigned_url.startswith('http'):
-                    opportunity = {
-                        'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
-                        'title': title,
-                        'state': state_name,
-                        'amount': amount,
-                        'deadline': 'Check website',
-                        'url': assigned_url,
-                        'tags': ['K-12', 'Education', 'AI-Discovered'],
-                        'found_date': datetime.now().isoformat(),
-                        'source': 'perplexity'
-                    }
-                    opportunities.append(opportunity)
-                    logger.info(f"Parsed grant: {title[:50]}... - URL: {assigned_url}")
-                else:
-                    logger.warning(f"Skipping grant '{title[:50]}...' - no valid URL found (URL: '{assigned_url}')")
-                    
-        logger.info(f"Parsed {len(opportunities)} opportunities from Perplexity response for {state_name}")
-        return opportunities[:5]  # Limit to top 5 opportunities per state
+                # Clean and validate URL
+                clean_url = clean_extracted_url(url)
+                if not clean_url or not clean_url.startswith('http'):
+                    logger.warning(f"Skipping grant '{title[:50]}...' - invalid URL: '{url}'")
+                    continue
+                
+                opportunity = {
+                    'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                    'title': title,
+                    'state': state_name,
+                    'amount': amount,
+                    'deadline': deadline,
+                    'url': clean_url,
+                    'tags': ['K-12', 'Education', 'AI-Discovered'],
+                    'found_date': datetime.now().isoformat(),
+                    'source': 'perplexity'
+                }
+                opportunities.append(opportunity)
+                logger.info(f"Added grant: {title[:50]}... - URL: {clean_url}")
+                
+            except Exception as grant_error:
+                logger.error(f"Error processing grant {i+1}: {grant_error}")
+                continue
+        
+        logger.info(f"Successfully parsed {len(opportunities)} opportunities from JSON for {state_name}")
+        return opportunities
         
     except Exception as e:
-        logger.error(f"Error parsing Perplexity response for {state_name}: {str(e)}")
+        logger.error(f"Error parsing Perplexity JSON response for {state_name}: {str(e)}")
         return []
 
 def enhance_opportunity_with_firecrawl(opportunity):
