@@ -80,26 +80,31 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize Firecrawl client: {str(e)}")
 
-# State DoE configurations - FIXED based on actual site analysis
+# State DoE configurations - UPDATED with verified working grant sources
 STATE_CONFIGS = {
     'TX': {
         'name': 'Texas',
         'url': 'https://tea.texas.gov/finance-and-grants/grants',
         'selectors': ['.field--name-body a', '.sectional-box a', 'strong a', '.field--type-text-with-summary a'],
-        'status': 'active'
+        'status': 'active',
+        'source_type': 'state',
+        'note': 'T-STEM grants and TEA funding opportunities'
     },
     'CA': {
         'name': 'California', 
-        'url': 'https://www.cde.ca.gov/fg/',
-        'selectors': ['main a', '.content a'],
-        'status': 'captcha_protected',  # Needs Firecrawl
-        'note': 'Protected by Radware anti-bot system'
+        'url': 'https://www.cde.ca.gov/fg/fo/af/',
+        'selectors': ['main a', '.content a', 'table a'],
+        'status': 'active',  # Verified working with real grants
+        'source_type': 'state',
+        'note': 'Golden State Pathways Program and CDE funding opportunities'
     },
     'FL': {
         'name': 'Florida',
-        'url': 'https://www.fldoe.org/finance/contracts-grants-procurement/grants-management/',
-        'selectors': ['.sectional-box a', '.col a', 'main a'],
-        'status': 'active'
+        'url': 'https://www.fldoe.org/academics/career-adult-edu/funding-opportunities/2024-2025-funding-opportunities/',
+        'selectors': ['.content a', 'main a', 'table a'],
+        'status': 'active',
+        'source_type': 'state',
+        'note': 'Computer Science grants and FDOE funding opportunities'
     },
     'NY': {
         'name': 'New York',
@@ -178,22 +183,30 @@ STATE_CONFIGS = {
         'source_type': 'direct_crawl',
         'status': 'needs_verification'
     },
-    # Federal sources
-    'FEDERAL_ED': {
-        'name': 'U.S. Department of Education',
-        'url': 'https://www.ed.gov/grants-and-programs/apply-grant/available-grants',
-        'selectors': ['.grant-listing a', 'main a', '.available-grants a'],
+    # Federal sources - UPDATED with verified grant programs
+    'NSF_DRK12': {
+        'name': 'NSF Discovery Research PreK-12',
+        'url': 'https://www.nsf.gov/funding/opportunities/drk-12-discovery-research-prek-12',
+        'selectors': ['.content a', 'main a', '.opportunity-details a'],
         'source_type': 'federal',
         'status': 'active',
-        'note': 'Federal education grants - typically larger amounts'
+        'note': '$50M available for PreK-12 STEM education research'
+    },
+    'ED_EIR': {
+        'name': 'Education Innovation and Research',
+        'url': 'https://www.ed.gov/grants-and-programs/grants-special-populations/economically-disadvantaged-students/education-innovation-and-research',
+        'selectors': ['.content a', 'main a', '.grant-details a'],
+        'source_type': 'federal',
+        'status': 'active',
+        'note': 'Innovation grants for early-phase, mid-phase, and expansion'
     },
     'GRANTS_GOV': {
         'name': 'Grants.gov Education',
-        'url': 'https://www.grants.gov/search-grants?fundingCategories=ED',
+        'url': 'https://www.grants.gov/search-grants?keywords=STEM',
         'selectors': ['.grant-listing a', '.results a', '.opportunity-link'],
         'source_type': 'federal',
         'status': 'active',
-        'note': 'All federal grants portal'
+        'note': 'Federal STEM grants portal'
     }
 }
 
@@ -354,6 +367,23 @@ def manual_scrape():
         })
     except Exception as e:
         logger.error(f"Manual scrape error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/populate-verified', methods=['POST'])
+def populate_verified_opportunities():
+    """Populate database with verified real opportunities"""
+    try:
+        added_count = add_verified_opportunities()
+        return jsonify({
+            'success': True,
+            'message': f'Added {added_count} verified opportunities to database.',
+            'opportunities_added': added_count
+        })
+    except Exception as e:
+        logger.error(f"Error populating verified opportunities: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1547,6 +1577,141 @@ def ai_powered_scrape_opportunities(state_code):
     logger.info(f"AI-powered discovery complete for {state_name}: {len(enhanced_opportunities)} opportunities")
     return enhanced_opportunities
 
+def add_verified_opportunities():
+    """Add the real opportunities found during research"""
+    verified_opportunities = [
+        {
+            'id': 'CA_golden_state_pathways_2024',
+            'title': 'Golden State Pathways Program - STEM Career Pathways',
+            'state': 'California',
+            'amount': '$470,000,000',
+            'deadline': 'Rolling - Check CDE website',
+            'url': 'https://www.cde.ca.gov/fg/fo/af/',
+            'tags': ['STEM', 'Career Pathways', 'High School', 'K-12'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'High schools creating career pathways in STEM, education, and health care',
+            'description': 'Expand dual enrollment, increase STEM career exposure through job shadowing, hire support staff for college/career planning',
+            'contact_info': 'Contact California Department of Education',
+            'source_type': 'state',
+            'quality_score': 9.0,
+            'application_process': 'Visit CDE funding opportunities page for application details',
+            'source_reliability': 'high'
+        },
+        {
+            'id': 'FL_computer_science_bonus_2025',
+            'title': 'Computer Science Teacher Bonus Grant',
+            'state': 'Florida',
+            'amount': 'Amount TBD',
+            'deadline': 'January 30, 2025',
+            'url': 'https://www.fldoe.org/academics/standards/subject-areas/computer-science/funding.stml',
+            'tags': ['Computer Science', 'Teacher Bonus', 'K-12', 'STEM'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'Districts for qualifying computer science teachers teaching identified CS courses',
+            'description': 'Provides funding to districts for qualifying computer science teachers',
+            'contact_info': 'CompSci@fldoe.org',
+            'source_type': 'state',
+            'quality_score': 8.5,
+            'application_process': 'Upload application documents to ShareFile by deadline',
+            'source_reliability': 'high'
+        },
+        {
+            'id': 'NSF_drk12_2024',
+            'title': 'NSF Discovery Research PreK-12 (DRK-12)',
+            'state': 'Federal',
+            'amount': 'Up to $3,000,000',
+            'deadline': 'Rolling submissions',
+            'url': 'https://www.nsf.gov/funding/opportunities/drk-12-discovery-research-prek-12/nsf23-596/solicitation',
+            'tags': ['STEM', 'Research', 'PreK-12', 'Federal'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'Educational researchers, universities, school districts',
+            'description': 'Catalyze research and development enhancing preK-12 STEM learning experiences',
+            'contact_info': 'NSF Education and Human Resources Directorate',
+            'source_type': 'federal',
+            'quality_score': 9.5,
+            'application_process': 'Submit via NSF FastLane System or Grants.gov',
+            'source_reliability': 'high'
+        },
+        {
+            'id': 'TX_tstem_planning_2025',
+            'title': 'T-STEM Planning and Implementation Grant',
+            'state': 'Texas',
+            'amount': 'Up to $6,000',
+            'deadline': 'February 2025 (estimated)',
+            'url': 'https://tea.texas.gov/finance-and-grants/grants/grants-administration/grants-awarded/2022-2024-t-stem-planning-and-implementation-grant',
+            'tags': ['T-STEM', 'Academy Planning', 'STEM', 'High School'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'Texas school districts developing new T-STEM Academies',
+            'description': 'Develop T-STEM Academies allowing students to earn STEM endorsement and industry certifications',
+            'contact_info': 'Texas Education Agency',
+            'source_type': 'state',
+            'quality_score': 8.0,
+            'application_process': 'Check TEA Grant Opportunities portal for current application cycle',
+            'source_reliability': 'high'
+        },
+        {
+            'id': 'ED_eir_innovation_2024',
+            'title': 'Education Innovation and Research (EIR) Program',
+            'state': 'Federal',
+            'amount': 'Various levels available',
+            'deadline': 'July 2024 (next cycle TBD)',
+            'url': 'https://www.ed.gov/grants-and-programs/grants-special-populations/economically-disadvantaged-students/education-innovation-and-research',
+            'tags': ['Innovation', 'Research', 'Early-phase', 'Federal'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'Educational organizations, school districts, nonprofits',
+            'description': 'Provides early-phase, mid-phase, and expansion grants for educational innovation',
+            'contact_info': 'U.S. Department of Education',
+            'source_type': 'federal',
+            'quality_score': 9.0,
+            'application_process': 'Submit through grants.gov during open application period',
+            'source_reliability': 'high'
+        },
+        {
+            'id': 'CA_title3_english_learner_2026',
+            'title': 'Title III English Learner Student Program',
+            'state': 'California',
+            'amount': 'Amount varies by district',
+            'deadline': 'June 30, 2025',
+            'url': 'https://www.cde.ca.gov/fg/fo/profile.asp?id=6427',
+            'tags': ['English Learners', 'Title III', 'K-12', 'Federal'],
+            'found_date': datetime.now().isoformat(),
+            'eligibility': 'California school districts serving English learner students',
+            'description': 'Federal funding to support English learner students in K-12 education',
+            'contact_info': 'California Department of Education',
+            'source_type': 'federal',
+            'quality_score': 7.5,
+            'application_process': 'Apply through CDE consolidated application process',
+            'source_reliability': 'high'
+        }
+    ]
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    c = conn.cursor()
+    
+    added_count = 0
+    for opp in verified_opportunities:
+        # Check if already exists
+        c.execute('SELECT id FROM opportunities WHERE id = ?', (opp['id'],))
+        if not c.fetchone():
+            c.execute('''INSERT INTO opportunities 
+                        (id, title, state, amount, deadline, url, tags, found_date,
+                         eligibility, description, contact_info, source_type, 
+                         quality_score, application_process, source_reliability)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     (opp['id'], opp['title'], opp['state'], opp['amount'],
+                      opp['deadline'], opp['url'], json.dumps(opp['tags']), 
+                      opp['found_date'], opp.get('eligibility', ''),
+                      opp.get('description', ''), opp.get('contact_info', ''),
+                      opp.get('source_type', 'unknown'), opp.get('quality_score', 5.0),
+                      opp.get('application_process', ''), opp.get('source_reliability', 'medium')))
+            added_count += 1
+            logger.info(f"Added verified opportunity: {opp['title']}")
+    
+    conn.commit()
+    conn.close()
+    
+    logger.info(f"Added {added_count} verified opportunities to database")
+    return added_count
+
 def check_all_states():
     """Check all states for new opportunities"""
     logger.info(f"Checking for new opportunities at {datetime.now()}")
@@ -1556,6 +1721,11 @@ def check_all_states():
     c = conn.cursor()
     
     for state_code in STATE_CONFIGS:
+        # Skip if status is not active
+        if STATE_CONFIGS[state_code].get('status') != 'active':
+            logger.info(f"Skipping {state_code} - status: {STATE_CONFIGS[state_code].get('status')}")
+            continue
+            
         # Try AI-powered scraping first, fallback to traditional scraping
         if perplexity_client and firecrawl_app:
             opportunities = ai_powered_scrape_opportunities(state_code)

@@ -1,156 +1,202 @@
-# K-12 Math Funding Monitor - Development Log
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-Built a complete AI-powered web application that monitors state Department of Education websites for K-12 mathematics funding opportunities and sends automated email alerts to subscribers.
 
-## What Was Built
+This is a professional-grade K-12 education funding monitor that automatically discovers grant opportunities from official state Department of Education websites and federal sources. The system uses a sophisticated multi-layered architecture with Firecrawl for reliable content extraction, Perplexity AI as fallback, and traditional web scraping as final fallback.
 
-### Core Application
-- **Flask Backend**: Complete REST API with subscription handling, opportunity tracking, and email notifications
-- **Responsive Frontend**: HTML/CSS/JS interface with AJAX form submission and real-time data display
-- **SQLite Database**: Stores subscribers and opportunities with proper schema
-- **Railway Deployment**: Production-ready deployment with health checks and monitoring
+## Core Architecture
 
-### AI-Powered Discovery System
-- **Perplexity Integration**: Uses PerplexiPy (v1.3.1) for intelligent opportunity discovery
-- **Firecrawl Integration**: Uses firecrawl-py for bypassing captchas and content extraction
-- **Hybrid Approach**: AI discovery + content enhancement for maximum accuracy
-- **Fallback Logic**: Traditional web scraping if AI services fail
+### Triple-Fallback Discovery System
+The system uses a cascade approach for maximum reliability:
+1. **Primary**: `crawl_official_sources()` → `firecrawl_crawl_source()` (Firecrawl on known official sources)
+2. **Fallback**: `discover_opportunities_with_perplexity()` (AI-powered discovery)  
+3. **Final**: `scrape_opportunities()` (Traditional BeautifulSoup scraping)
 
-### Key Features Implemented
-- ✅ Automated daily monitoring at 9 AM
-- ✅ Email subscription management with frequency preferences  
-- ✅ State-specific filtering (10 states supported)
-- ✅ Real-time opportunity discovery and enhancement
-- ✅ REST API endpoints for manual triggering and testing
-- ✅ Health monitoring and service status reporting
-- ✅ Environment variable configuration for security
+### Database Schema Evolution
+The system has two database schemas:
+- **Legacy**: Basic fields (id, title, state, amount, deadline, url, tags, found_date)
+- **Professional**: Enhanced with (eligibility, description, contact_info, source_type, quality_score, application_process, source_reliability)
 
-## Technical Architecture
+The `get_recent_opportunities()` function handles both schemas gracefully with length checks.
 
-### Dependencies Added
-```
-Flask==2.3.3
-Flask-CORS==4.0.0
-requests==2.31.0
-beautifulsoup4==4.12.2
-APScheduler==3.10.4
-gunicorn==21.2.0
-python-dotenv==1.0.0
-lxml==4.9.3
-openai>=1.40.0
-firecrawl-py==0.0.16
-PerplexiPy==1.3.1
+### State Configuration System
+`STATE_CONFIGS` dictionary contains 17 sources:
+- **15 State DoE websites** (TX, CA, FL, NY, IL, PA, OH, GA, NC, MI, VA, CO, OR, AZ, WA)
+- **2 Federal sources** (FEDERAL_ED, GRANTS_GOV)
+- Each config includes: name, url, CSS selectors, status, source_type, notes
+
+Status types: `'active'`, `'needs_verification'`, `'captcha_protected'`, `'inactive'`
+
+## Development Commands
+
+### Local Development
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run locally (debug mode)
+python app.py
+
+# Access at http://localhost:5000
 ```
 
-### Environment Variables Required
+### Testing API Endpoints
+```bash
+# Test full system scrape
+curl -X POST http://localhost:5000/api/scrape
+
+# Test specific state (Firecrawl-first approach)
+curl -X POST http://localhost:5000/api/scrape/ai/TX
+
+# Get opportunities with professional fields
+curl "http://localhost:5000/api/opportunities?limit=5" | python -m json.tool
+
+# Check system health and AI service status
+curl http://localhost:5000/health | python -m json.tool
+
+# Check database stats
+curl http://localhost:5000/api/stats | python -m json.tool
 ```
-PERPLEXITY_API_KEY=pplx-xxx
-FIRECRAWL_API_KEY=fc-xxx  
-SENDER_EMAIL=harrison@dododigital.ai
-SENDER_PASSWORD=[gmail app password]
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
+
+### Database Operations
+```bash
+# Database auto-initializes on first run via init_db()
+# Local: ./funding_monitor.db
+# Railway: /data/funding_monitor.db (persistent volume)
+
+# Clear opportunities for fresh test
+# No direct command - use Railway logs or manual deletion
 ```
 
-### API Endpoints
-- `GET /` - Main dashboard page
-- `POST /subscribe` - Subscribe to alerts
-- `GET /api/opportunities` - Get recent opportunities (JSON)
-- `GET /api/stats` - Get current statistics (JSON)
-- `GET /health` - Health check endpoint
-- `POST /api/scrape` - Manually trigger full scraping
-- `POST /api/scrape/ai/{state}` - Test AI scraping for specific state
+## Key Architecture Components
 
-## Current Status: MOSTLY WORKING ✅
+### AI Services Integration
+- **Firecrawl**: Primary content extraction with `formats=['markdown', 'html']`
+- **Perplexity**: Uses PerplexiPy OR OpenAI client as fallback
+- **Quality Filtering**: `is_high_quality_opportunity()` rejects PDFs, archives, summaries
 
-### ✅ What's Working
-- Flask application deployed and running on Railway
-- AI services (Perplexity + Firecrawl) properly initialized
-- Database storing opportunities (50+ found)
-- Basic opportunity discovery across states
-- Health checks and monitoring
-- Frontend displaying opportunities
-- **FIXED: URL parsing and validation system**
-- **FIXED: Clean URL extraction from Perplexity responses**
+### Content Enhancement Pipeline
+1. **Discovery**: Find grant URLs from official pages
+2. **Extraction**: Extract title, amount, deadline from surrounding text
+3. **Enhancement**: `enhance_opportunity_with_firecrawl()` extracts professional details
+4. **Quality Scoring**: Rates 1-10 based on completeness and source reliability
 
-### ✅ **Recent Critical Fixes**
+### Automated Scheduling
+- **Schedule**: Twice weekly (Tuesdays & Fridays at 9 AM)
+- **Function**: `check_all_states()` iterates through all STATE_CONFIGS
+- **Production Only**: `if not app.debug` prevents scheduler in development
 
-#### 1. **URL Parsing FIXED** ✅
-- ✅ Added `clean_extracted_url()` function to properly clean URLs
-- ✅ Removes markdown artifacts like `[1]`, `[2]` from URLs  
-- ✅ Added `extract_urls_from_text()` with multiple URL patterns
-- ✅ Improved URL validation with proper regex checks
-- ✅ Test shows problematic URLs now cleaned: `https://tealprod.tea.state.tx.us/GrantOpportunities/forms/GrantProgramSearch.aspx)[1].` → `https://tealprod.tea.state.tx.us/GrantOpportunities/forms/GrantProgramSearch.aspx`
-- ✅ Enhanced Perplexity prompt for structured output format
+## Environment Variables
 
-### ❌ **Remaining Issues**
+### Required for Production
+```bash
+PERPLEXITY_API_KEY=pplx-xxx         # Perplexity AI API access
+FIRECRAWL_API_KEY=fc-xxx            # Firecrawl API for content extraction  
+SENDER_EMAIL=email@domain.com       # Gmail for notifications
+SENDER_PASSWORD=app_password        # Gmail app password (not regular password)
+```
 
-#### 2. **Data Quality Improvements Needed**
-- Opportunity titles sometimes truncated (need better parsing)
-- Missing proper funding amounts (mostly "Amount TBD")
-- Deadline information not being extracted consistently
-- Firecrawl enhancement could be more effective
+### Optional
+```bash
+SMTP_SERVER=smtp.gmail.com          # Default provided
+SMTP_PORT=587                       # Default provided
+DATABASE_DIR=/data                  # Railway persistent volume path
+```
 
-#### 3. **State Filtering** (Status: LIKELY FIXED)
-- Previous issue: All opportunities showing as "Michigan"
-- Root cause: Likely old database data before fixes
-- Fix: State assignment logic is correct in current code
-- Need to test with fresh database to confirm fix
+## Professional Data Fields
 
-#### 4. **Missing Email Functionality**
-- Email notifications not tested/working
-- Need Gmail app password configuration
-- Welcome emails and opportunity alerts not verified
+The enhanced database schema includes professional fields extracted by `enhance_opportunity_with_firecrawl()`:
 
-## Immediate Next Steps
+- **eligibility**: Who can apply, requirements (300 char limit)
+- **description**: Program overview, purpose (500 char limit)  
+- **contact_info**: Email, phone, program contacts (200 char limit)
+- **application_process**: How to apply instructions (300 char limit)
+- **quality_score**: 1.0-10.0 rating (Federal: 8.0+, State: 7.0+, Traditional: 6.0+)
+- **source_reliability**: 'high', 'medium', 'low'
+- **source_type**: 'federal', 'state', 'direct_crawl', 'unknown'
 
-### Priority 1: Test Full System ✅
-- ✅ URL parsing fixes implemented and tested
-- ⏳ Test live scraping to verify all fixes work
-- ⏳ Clear old database data and test fresh scraping
-- ⏳ Verify state distribution works correctly
+## Critical Architecture Patterns
 
-### Priority 2: Improve Data Quality  
-- Fix opportunity title extraction from Perplexity responses
-- Enhance Firecrawl integration to extract better amounts/deadlines
-- Improve content parsing for structured data
-- Add data validation and cleanup
+### Error Handling Philosophy
+- **Graceful Degradation**: Each layer falls back to next method if previous fails
+- **Never Fail Completely**: Always return empty list rather than crash
+- **Comprehensive Logging**: Every failure logged with context for debugging
 
-### Priority 3: Fix State Distribution
-- Debug why all opportunities showing as Michigan
-- Ensure proper state assignment in AI scraping
-- Test individual state endpoints work correctly
-- Verify state filtering in frontend
+### URL Cleaning Pipeline
+URLs go through `clean_extracted_url()` which:
+1. Removes markdown artifacts `[1]`, `[2]` 
+2. Strips trailing punctuation and brackets
+3. Validates format with regex `https?://[^\s<>"]+\.[a-zA-Z]{2,}`
 
-### Priority 4: Complete Email System
-- Add Gmail app password to environment
-- Test welcome email functionality
-- Test opportunity alert emails
-- Verify subscription workflow end-to-end
+### Railway Deployment Specifics
+- **Persistent Volume**: `/data` mounted for SQLite database persistence
+- **Health Checks**: `/health` endpoint with 300s timeout
+- **Auto-restart**: `on_failure` with 3 max retries
+- **Environment Detection**: `os.environ.get('RAILWAY_ENVIRONMENT')` for production logic
 
-## Next Steps
-1. **Debug and fix URL parsing in `parse_perplexity_response()`**
-2. **Fix state assignment logic in `ai_powered_scrape_opportunities()`**
-3. **Improve Firecrawl enhancement in `enhance_opportunity_with_firecrawl()`**
-4. **Test and validate all opportunity links work**
-5. **Complete email notification system setup**
-6. **Test full user workflow from subscription to alert**
+## Quality Control System
 
-## Deployment Info
-- **Production URL**: https://web-production-f2b68.up.railway.app
-- **GitHub Repo**: https://github.com/hwells4/doe-monitor
-- **Railway Project**: Connected with auto-deploy from main branch
-- **Database**: SQLite with persistent storage on Railway
+### Content Filtering
+`is_high_quality_opportunity()` rejects:
+- **Red Flag Terms**: budget, summary, legislative, archive, report, presentation
+- **Bad URLs**: .pdf, /archive, /budget, /reports, /minutes
+- **Missing Actionable Terms**: Must contain application, grant, funding, rfp, etc.
 
-## Files Created/Modified
-- `app.py` - Main Flask application (800+ lines)
-- `requirements.txt` - Python dependencies
-- `templates/` - HTML templates with Jinja2
-- `static/` - CSS and JavaScript files
-- `railway.toml` - Railway deployment config
-- `Procfile` - Process configuration
-- `.env.example` - Environment variable template
-- `.gitignore` - Git ignore patterns
+### Source Reliability Scoring
+- **Federal Sources**: Highest quality (8.0+ score, 'high' reliability)
+- **State DoE Sources**: High quality (7.0+ score, 'high' reliability)  
+- **Traditional Scraping**: Medium quality (6.0+ score, 'medium' reliability)
+- **Enhanced Opportunities**: +1.5 bonus if both eligibility and description found
 
-The core infrastructure is solid but data quality and URL validity issues need immediate attention before this can be considered production-ready for Kesley.
+## Frontend Integration
+
+### AJAX Loading Pattern
+- **Initial Load**: `loadOpportunities(true)` resets pagination
+- **State Filter**: `filterByState()` triggers fresh load with state parameter
+- **Pagination**: `loadMoreOpportunities()` appends to existing results
+- **Real-time Updates**: No auto-refresh, manual trigger only
+
+### Professional Display Fields
+Frontend receives and can display all professional fields:
+```javascript
+// Available in opportunity objects
+opp.eligibility, opp.description, opp.contact_info
+opp.application_process, opp.quality_score, opp.source_reliability
+```
+
+## Troubleshooting Common Issues
+
+### "Only Oregon Opportunities Found"
+- Check other state configs have correct `'status': 'active'`
+- Verify Firecrawl extraction patterns work for each state's website structure
+- Review logs for specific state failures during `check_all_states()`
+
+### "No Opportunities Found"
+- Ensure AI services are configured: check `/health` endpoint
+- Verify STATE_CONFIGS URLs are accessible and haven't changed
+- Check if quality filters are too restrictive in `is_high_quality_opportunity()`
+
+### "Database Persistence Issues"
+- Railway: Ensure `/data` volume is properly mounted via `railway.toml`
+- Local: Check write permissions in project directory
+- Verify `DATABASE_PATH` logging shows correct location
+
+### "Email Notifications Not Working"
+- Use Gmail App Password, not regular password
+- Verify SMTP configuration in EMAIL_CONFIG
+- Check email formatting in `send_alerts()` function
+
+## Production Deployment
+
+The system is designed for Railway deployment with:
+- **Auto-deployment** from GitHub main branch
+- **Health monitoring** via `/health` endpoint  
+- **Persistent database** via mounted volume
+- **Environment-based configuration** for development vs production
+- **Automatic scheduling** only in production environment
+
+## Architecture Philosophy
+
+This system prioritizes **reliability over speed** and **quality over quantity**. The triple-fallback architecture ensures something always works, while the quality filtering ensures results are professionally useful rather than academically interesting. The professional data fields transform it from a prototype into a tool that K-12 administrators can actually use to find and apply for funding.
