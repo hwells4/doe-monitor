@@ -414,6 +414,91 @@ def format_date(date_string):
     except:
         return "Recently"
 
+def clean_extracted_url(url):
+    """Clean and validate extracted URLs"""
+    if not url:
+        return ''
+    
+    # Remove common trailing artifacts
+    url = re.sub(r'[\)\]\}\.,:;!?]*$', '', url.strip())
+    
+    # Remove markdown link artifacts like [1], [2] etc.
+    url = re.sub(r'\[\d+\]\.?$', '', url)
+    
+    # Remove trailing periods and other punctuation
+    url = url.rstrip('.,;:!?)\]}')
+    
+    # Validate URL format
+    if url and url.startswith('http') and len(url) > 10:
+        # Basic URL validation
+        if re.match(r'https?://[^\s<>"]+\.[a-zA-Z]{2,}', url):
+            return url
+    
+    return ''
+
+def extract_urls_from_text(text):
+    """Extract and clean URLs from text with improved patterns"""
+    urls = set()  # Use set to avoid duplicates
+    
+    # Multiple URL extraction patterns
+    url_patterns = [
+        # Standard URLs
+        r'https?://[^\s<>"\]\)]+',
+        # Markdown links [text](url)
+        r'\[([^\]]+)\]\((https?://[^\)]+)\)',
+        # URLs in parentheses
+        r'\((https?://[^\)]+)\)',
+        # URLs after common prefixes
+        r'(?:URL|Link|Website|Source):\s*(https?://[^\s<>"\]\)]+)',
+    ]
+    
+    for pattern in url_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            if isinstance(match, tuple):
+                # Take the URL part from tuple matches
+                url = match[1] if len(match) > 1 and match[1] else match[0]
+            else:
+                url = match
+            
+            clean_url = clean_extracted_url(url)
+            if clean_url:
+                urls.add(clean_url)
+    
+    return list(urls)
+
+def extract_grant_titles_from_text(text):
+    """Extract grant titles from text with improved patterns"""
+    grant_titles = []
+    
+    # Multiple patterns to find grant titles
+    grant_patterns = [
+        # Lines starting with numbers or bullets containing grant keywords
+        r'(?:^|\n)(?:\d+\.\s*|\*\s*|-\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative|Opportunity)[^.\n]*)',
+        # Headers with grant keywords  
+        r'(?:^|\n)(?:#+\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative)[^.\n]*)',
+        # Bold text with grant keywords
+        r'(?:\*\*|##)\s*([^*\n]*(?:Grant|Funding|Program|Initiative)[^*\n]*)',
+        # Standalone lines with education keywords
+        r'(?:^|\n)([^.\n]*(?:Education|STEM|Math|Science|Technology)[^.\n]*(?:Grant|Funding|Program)[^.\n]*)',
+    ]
+    
+    for pattern in grant_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            # Clean up the title
+            title = re.sub(r'^[\d\.\-\*\•\s#]+', '', match).strip()
+            title = re.sub(r'\*+', '', title).strip()
+            title = re.sub(r'^\W+|\W+$', '', title).strip()
+            
+            # Validate title quality
+            if (10 < len(title) < 120 and 
+                title not in grant_titles and
+                not title.lower().startswith(('http', 'www', 'for more', 'contact', 'phone', 'email'))):
+                grant_titles.append(title)
+    
+    return grant_titles
+
 def extract_dollar_amount(text):
     """Extract dollar amount from text"""
     if not text:
@@ -619,14 +704,20 @@ def discover_opportunities_with_perplexity(state_name, state_code):
     try:
         # Craft a specific query for current funding opportunities
         query = f"""Find current K-12 education funding opportunities, grants, and RFPs available in {state_name} for 2025. 
+        
+        Please format each opportunity clearly as:
+        TITLE: [exact grant name]
+        AMOUNT: [funding amount if available]  
+        DEADLINE: [application deadline if available]
+        URL: [official website link]
+        
         Include:
-        - Grant names and titles
+        - Grant names and titles for Math, STEM, and general K-12 education
         - Application deadlines  
         - Funding amounts
-        - Official website URLs from {state_name} Department of Education
-        - Math, STEM, and general education grants
+        - Official website URLs from {state_name} Department of Education or state agencies
         
-        Focus on opportunities that are currently open or opening soon. Provide specific URLs when available."""
+        Focus on opportunities that are currently open or opening soon in {state_name}. Provide specific, valid URLs when available."""
         
         logger.info(f"Querying Perplexity for {state_name} opportunities...")
         
@@ -674,6 +765,9 @@ def parse_perplexity_response(ai_response, state_name, state_code):
     opportunities = []
     
     try:
+        logger.info(f"Parsing Perplexity response for {state_name}. Response length: {len(ai_response)}")
+        logger.info(f"Response preview: {ai_response[:300]}...")
+        
         # First, try to parse structured format (TITLE:, AMOUNT:, etc.)
         structured_matches = re.findall(
             r'TITLE:\s*([^\n]+).*?AMOUNT:\s*([^\n]+).*?DEADLINE:\s*([^\n]+).*?URL:\s*([^\n]+)',
@@ -684,59 +778,35 @@ def parse_perplexity_response(ai_response, state_name, state_code):
             logger.info(f"Found {len(structured_matches)} structured grants for {state_name}")
             for i, (title, amount, deadline, url) in enumerate(structured_matches[:5]):
                 if title and len(title.strip()) > 5:
+                    # Clean and validate URL
+                    clean_url = clean_extracted_url(url.strip())
                     opportunity = {
                         'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
                         'title': title.strip(),
                         'state': state_name,
                         'amount': amount.strip() if amount.strip() else 'Amount TBD',
                         'deadline': deadline.strip() if deadline.strip() else 'Check website',
-                        'url': url.strip() if url.strip().startswith('http') else '',
+                        'url': clean_url,
                         'tags': ['K-12', 'Education', 'AI-Discovered'],
                         'found_date': datetime.now().isoformat(),
                         'source': 'perplexity'
                     }
                     opportunities.append(opportunity)
-                    logger.info(f"Structured grant: {title[:50]}... - {amount}")
+                    logger.info(f"Structured grant: {title[:50]}... - URL: {clean_url}")
         
         # If no structured format found, fall back to parsing
         if not opportunities:
             logger.info(f"No structured format, parsing unstructured response for {state_name}")
             
-            # Extract clean URLs from response
-            urls = []
-            url_patterns = [
-                r'https?://[^\s<>"\]\)]+',
-                r'\[([^\]]+)\]\((https?://[^\)]+)\)',
-            ]
+            # Extract clean URLs from response with improved patterns
+            urls = extract_urls_from_text(ai_response)
+            logger.info(f"Extracted {len(urls)} URLs from response")
             
-            for pattern in url_patterns:
-                matches = re.findall(pattern, ai_response)
-                for match in matches:
-                    if isinstance(match, tuple):
-                        url = match[1] if match[1] else match[0]
-                    else:
-                        url = match
-                    url = url.rstrip('.,;!?)\]}')
-                    if url and url.startswith('http') and url not in urls:
-                        urls.append(url)
+            # Look for grant names in the text with improved patterns
+            grant_titles = extract_grant_titles_from_text(ai_response)
+            logger.info(f"Extracted {len(grant_titles)} grant titles from response")
             
-            # Look for grant names in the text
-            grant_patterns = [
-                r'(?:^|\n)(?:\d+\.\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative|Opportunity)[^.\n]*)',
-                r'(?:^|\n)(?:#+\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative)[^.\n]*)',
-                r'(?:\*\*|##)\s*([^*\n]*(?:Grant|Funding|Program|Initiative)[^*\n]*)',
-            ]
-            
-            grant_titles = []
-            for pattern in grant_patterns:
-                matches = re.findall(pattern, ai_response, re.IGNORECASE | re.MULTILINE)
-                for match in matches:
-                    title = re.sub(r'^[\d\.\-\*\•\s#]+', '', match).strip()
-                    title = re.sub(r'\*+', '', title).strip()
-                    if 10 < len(title) < 120 and title not in grant_titles:
-                        grant_titles.append(title)
-            
-            # Create opportunities from found titles
+            # Create opportunities from found titles and URLs
             for i, title in enumerate(grant_titles[:5]):
                 # Try to find amount in nearby text
                 amount = 'Amount TBD'
@@ -747,19 +817,26 @@ def parse_perplexity_response(ai_response, state_name, state_code):
                     if amount_match:
                         amount = amount_match.group(0)
                 
+                # Assign URL if available
+                assigned_url = ''
+                if i < len(urls):
+                    assigned_url = urls[i]
+                elif urls:
+                    assigned_url = urls[0]  # Use first URL as fallback
+                
                 opportunity = {
                     'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
                     'title': title,
                     'state': state_name,
                     'amount': amount,
                     'deadline': 'Check website',
-                    'url': urls[i] if i < len(urls) else (urls[0] if urls else ''),
+                    'url': assigned_url,
                     'tags': ['K-12', 'Education', 'AI-Discovered'],
                     'found_date': datetime.now().isoformat(),
                     'source': 'perplexity'
                 }
                 opportunities.append(opportunity)
-                logger.info(f"Parsed grant: {title[:50]}... - {amount}")
+                logger.info(f"Parsed grant: {title[:50]}... - URL: {assigned_url[:50]}...")
                     
         logger.info(f"Parsed {len(opportunities)} opportunities from Perplexity response for {state_name}")
         return opportunities[:5]  # Limit to top 5 opportunities per state
