@@ -857,12 +857,24 @@ def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
         # Clean up the response to extract JSON
         json_text = ai_response.strip()
         
+        # Remove markdown code blocks
+        if json_text.startswith('```'):
+            # Remove opening ```
+            json_text = json_text[3:]
+            if json_text.startswith('json'):
+                json_text = json_text[4:]
+            json_text = json_text.strip()
+            
+            # Remove closing ```
+            if json_text.endswith('```'):
+                json_text = json_text[:-3].strip()
+        
         # Remove any text before the JSON array
         if '[' in json_text:
             json_text = json_text[json_text.find('['):]
         
         # Remove any text after the JSON array
-        if json_text.endswith(']'):
+        if ']' in json_text:
             # Find the last closing bracket
             last_bracket = json_text.rfind(']')
             json_text = json_text[:last_bracket + 1]
