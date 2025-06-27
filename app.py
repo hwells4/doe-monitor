@@ -15,6 +15,10 @@ import logging
 from dotenv import load_dotenv
 from openai import OpenAI
 from firecrawl import FirecrawlApp
+try:
+    from perplexipy import Perplexi
+except ImportError:
+    Perplexi = None
 
 # Load environment variables
 load_dotenv()
@@ -46,12 +50,16 @@ perplexity_client = None
 firecrawl_app = None
 
 try:
-    if PERPLEXITY_API_KEY:
+    if PERPLEXITY_API_KEY and Perplexi:
+        perplexity_client = Perplexi(api_key=PERPLEXITY_API_KEY)
+        logger.info("Perplexity client initialized successfully with PerplexiPy")
+    elif PERPLEXITY_API_KEY:
+        # Fallback to OpenAI client
         perplexity_client = OpenAI(
             api_key=PERPLEXITY_API_KEY,
             base_url="https://api.perplexity.ai"
         )
-        logger.info("Perplexity client initialized successfully")
+        logger.info("Perplexity client initialized with OpenAI client")
     else:
         logger.warning("PERPLEXITY_API_KEY not found")
 except Exception as e:
@@ -622,23 +630,31 @@ def discover_opportunities_with_perplexity(state_name, state_code):
         
         logger.info(f"Querying Perplexity for {state_name} opportunities...")
         
-        response = perplexity_client.chat.completions.create(
-            model="llama-3.1-sonar-large-128k-online",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are an expert research assistant specializing in education funding opportunities. Provide accurate, current information with specific details and official URLs."
-                },
-                {
-                    "role": "user", 
-                    "content": query
-                }
-            ],
-            temperature=0.1,
-            max_tokens=2000
-        )
-        
-        ai_response = response.choices[0].message.content
+        # Check if we're using PerplexiPy or OpenAI client
+        if hasattr(perplexity_client, 'chat') and hasattr(perplexity_client.chat, 'completions'):
+            # OpenAI client format
+            response = perplexity_client.chat.completions.create(
+                model="llama-3.1-sonar-large-128k-online",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are an expert research assistant specializing in education funding opportunities. Provide accurate, current information with specific details and official URLs."
+                    },
+                    {
+                        "role": "user", 
+                        "content": query
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            ai_response = response.choices[0].message.content
+        else:
+            # PerplexiPy format
+            ai_response = perplexity_client.query(
+                query=query,
+                model="llama-3.1-sonar-large-128k-online"
+            )
         logger.info(f"Perplexity found opportunities for {state_name}")
         
         # Parse the AI response to extract structured opportunity data
