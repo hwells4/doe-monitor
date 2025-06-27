@@ -805,11 +805,21 @@ def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
         # Parse the JSON
         try:
             grant_data = json.loads(json_text)
+            
+            # Validate that we got an array
+            if not isinstance(grant_data, list):
+                logger.error(f"Expected JSON array, got {type(grant_data)}: {grant_data}")
+                logger.info(f"Falling back to text parsing for {state_name}")
+                return fallback_text_parsing(ai_response, state_name, state_code)
+            
             logger.info(f"Successfully parsed JSON with {len(grant_data)} grants")
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing failed: {e}")
             logger.error(f"Attempted to parse: {json_text}")
-            return []
+            logger.info(f"Falling back to text parsing for {state_name}")
+            
+            # Fallback to text parsing if JSON fails
+            return fallback_text_parsing(ai_response, state_name, state_code)
         
         # Convert JSON data to opportunities
         for i, grant in enumerate(grant_data[:5]):  # Limit to 5
@@ -853,6 +863,65 @@ def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
         
     except Exception as e:
         logger.error(f"Error parsing Perplexity JSON response for {state_name}: {str(e)}")
+        logger.info(f"Falling back to text parsing for {state_name}")
+        return fallback_text_parsing(ai_response, state_name, state_code)
+
+def fallback_text_parsing(ai_response, state_name, state_code):
+    """Fallback text parsing if JSON parsing fails"""
+    opportunities = []
+    
+    try:
+        logger.info(f"Using fallback text parsing for {state_name}")
+        
+        # Extract URLs from text
+        urls = extract_urls_from_text(ai_response)
+        logger.info(f"Extracted {len(urls)} URLs from response text")
+        
+        # Extract grant titles
+        grant_titles = extract_grant_titles_from_text(ai_response)
+        logger.info(f"Extracted {len(grant_titles)} grant titles from response text")
+        
+        # Create opportunities from titles and URLs
+        for i, title in enumerate(grant_titles[:3]):  # Limit to 3 for fallback
+            # Try to find amount in nearby text
+            amount = 'Amount TBD'
+            title_index = ai_response.find(title)
+            if title_index >= 0:
+                nearby_text = ai_response[max(0, title_index-200):title_index+200]
+                amount_match = re.search(r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|thousand|K))?', nearby_text)
+                if amount_match:
+                    amount = amount_match.group(0)
+            
+            # Assign URL if available
+            assigned_url = ''
+            if i < len(urls):
+                assigned_url = urls[i]
+            elif urls:
+                assigned_url = urls[0]  # Use first URL as fallback
+            
+            # Only add opportunities with valid URLs
+            if assigned_url and assigned_url.startswith('http'):
+                opportunity = {
+                    'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                    'title': title,
+                    'state': state_name,
+                    'amount': amount,
+                    'deadline': 'Check website',
+                    'url': assigned_url,
+                    'tags': ['K-12', 'Education', 'AI-Discovered', 'Text-Parsed'],
+                    'found_date': datetime.now().isoformat(),
+                    'source': 'perplexity_fallback'
+                }
+                opportunities.append(opportunity)
+                logger.info(f"Fallback parsed: {title[:50]}... - URL: {assigned_url}")
+            else:
+                logger.warning(f"Skipping fallback grant '{title[:50]}...' - no valid URL")
+        
+        logger.info(f"Fallback parsing found {len(opportunities)} opportunities for {state_name}")
+        return opportunities
+        
+    except Exception as e:
+        logger.error(f"Fallback text parsing also failed for {state_name}: {str(e)}")
         return []
 
 def enhance_opportunity_with_firecrawl(opportunity):
