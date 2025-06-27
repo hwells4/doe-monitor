@@ -538,7 +538,7 @@ def get_current_stats():
         return {
             'total_opportunities': total_opportunities,
             'total_subscribers': total_subscribers,
-            'total_funding': f'${total_funding:,.0f}' if total_funding > 0 else '$47M+',
+            'total_funding': f'${total_funding:,.0f}' if total_funding > 0 else 'TBD',
             'states_monitored': len(STATE_CONFIGS)
         }
     except Exception as e:
@@ -546,7 +546,7 @@ def get_current_stats():
         return {
             'total_opportunities': 23,
             'total_subscribers': 0,
-            'total_funding': '$47M+',
+            'total_funding': 'TBD',
             'states_monitored': len(STATE_CONFIGS)
         }
 
