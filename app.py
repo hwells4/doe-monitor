@@ -227,7 +227,13 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'database': check_database_health(),
-        'scheduler': scheduler.running if scheduler else False
+        'scheduler': scheduler.running if scheduler else False,
+        'ai_services': {
+            'perplexity_configured': bool(PERPLEXITY_API_KEY),
+            'firecrawl_configured': bool(FIRECRAWL_API_KEY),
+            'perplexity_client_ready': bool(perplexity_client),
+            'firecrawl_app_ready': bool(firecrawl_app)
+        }
     })
 
 @app.route('/api/scrape', methods=['POST'])
