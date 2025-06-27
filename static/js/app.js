@@ -139,3 +139,37 @@ function updateStatCards(stats) {
 
 // Update stats every 5 minutes
 setInterval(updateStats, 300000);
+
+// Manual scrape function
+async function triggerScrape() {
+    const button = event.target;
+    const originalText = button.textContent;
+    
+    try {
+        button.textContent = '⏳ Scanning state websites...';
+        button.disabled = true;
+        
+        const response = await fetch('/api/scrape', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Scan complete! Found ${data.opportunities_found} new opportunities.`);
+            // Reload page to show new opportunities
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            alert('Error scanning websites. Please try again.');
+        }
+    } catch (error) {
+        console.error('Scrape error:', error);
+        alert('Error scanning websites. Please try again.');
+    } finally {
+        button.textContent = originalText;
+        button.disabled = false;
+    }
+}

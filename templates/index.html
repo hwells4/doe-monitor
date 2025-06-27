@@ -24,6 +24,14 @@
 
     <div class="recent-opportunities">
         <h3>Recent Opportunities Found</h3>
+        {% if opportunities|length == 0 %}
+        <div style="text-align: center; margin: 20px 0;">
+            <p style="color: #666; margin-bottom: 20px;">No opportunities found yet. Click below to scan state websites:</p>
+            <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
+                🔍 Scan for Opportunities Now
+            </button>
+        </div>
+        {% endif %}
         
         {% if opportunities %}
             {% for opp in opportunities %}

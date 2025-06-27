@@ -200,6 +200,24 @@ def health_check():
         'scheduler': scheduler.running if scheduler else False
     })
 
+@app.route('/api/scrape', methods=['POST'])
+def manual_scrape():
+    """Manually trigger opportunity scraping"""
+    try:
+        # Check if this is the first run or manual trigger
+        new_opportunities = check_all_states()
+        return jsonify({
+            'success': True,
+            'message': f'Scraping complete. Found {len(new_opportunities)} new opportunities.',
+            'opportunities_found': len(new_opportunities)
+        })
+    except Exception as e:
+        logger.error(f"Manual scrape error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # Helper functions
 def get_recent_opportunities():
     """Get recent opportunities from database"""
