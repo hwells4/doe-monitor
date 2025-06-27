@@ -638,7 +638,7 @@ def discover_opportunities_with_perplexity(state_name, state_code):
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are an expert research assistant specializing in education funding opportunities. Provide accurate, current information with specific details and official URLs."
+                        "content": "You are a helpful assistant. List specific grant programs with exact titles, amounts, deadlines, and official URLs. Format each grant clearly with: TITLE: [exact grant name], AMOUNT: [funding amount], DEADLINE: [application deadline], URL: [official website link]"
                     },
                     {
                         "role": "user", 
@@ -650,12 +650,15 @@ def discover_opportunities_with_perplexity(state_name, state_code):
             )
             ai_response = response.choices[0].message.content
         else:
-            # PerplexiPy format
-            ai_response = perplexity_client.query(
-                query=query,
-                model="llama-3.1-sonar-large-128k-online"
-            )
-        logger.info(f"Perplexity found opportunities for {state_name}")
+            # PerplexiPy format - try different method calls
+            try:
+                ai_response = perplexity_client.query(query)
+            except:
+                try:
+                    ai_response = perplexity_client.search(query)
+                except:
+                    ai_response = str(perplexity_client)
+        logger.info(f"Perplexity response for {state_name}: {ai_response[:200]}...")
         
         # Parse the AI response to extract structured opportunity data
         opportunities = parse_perplexity_response(ai_response, state_name, state_code)
@@ -671,131 +674,92 @@ def parse_perplexity_response(ai_response, state_name, state_code):
     opportunities = []
     
     try:
-        # Extract clean URLs from response (remove markdown link syntax)
-        urls = []
-        url_patterns = [
-            r'https?://[^\s<>"\]\)]+',  # Basic URLs
-            r'\[([^\]]+)\]\((https?://[^\)]+)\)',  # Markdown links [text](url)
-            r'(https?://[^\s<>"\]\)]+)\s*\)',  # URLs followed by )
-        ]
+        # First, try to parse structured format (TITLE:, AMOUNT:, etc.)
+        structured_matches = re.findall(
+            r'TITLE:\s*([^\n]+).*?AMOUNT:\s*([^\n]+).*?DEADLINE:\s*([^\n]+).*?URL:\s*([^\n]+)',
+            ai_response, re.DOTALL | re.IGNORECASE
+        )
         
-        for pattern in url_patterns:
-            matches = re.findall(pattern, ai_response)
-            for match in matches:
-                if isinstance(match, tuple):
-                    # Markdown link - take the URL part
-                    url = match[1] if match[1] else match[0]
-                else:
-                    url = match
-                # Clean up URL
-                url = url.rstrip('.,;!?)\]}')
-                if url and url.startswith('http') and url not in urls:
-                    urls.append(url)
+        if structured_matches:
+            logger.info(f"Found {len(structured_matches)} structured grants for {state_name}")
+            for i, (title, amount, deadline, url) in enumerate(structured_matches[:5]):
+                if title and len(title.strip()) > 5:
+                    opportunity = {
+                        'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                        'title': title.strip(),
+                        'state': state_name,
+                        'amount': amount.strip() if amount.strip() else 'Amount TBD',
+                        'deadline': deadline.strip() if deadline.strip() else 'Check website',
+                        'url': url.strip() if url.strip().startswith('http') else '',
+                        'tags': ['K-12', 'Education', 'AI-Discovered'],
+                        'found_date': datetime.now().isoformat(),
+                        'source': 'perplexity'
+                    }
+                    opportunities.append(opportunity)
+                    logger.info(f"Structured grant: {title[:50]}... - {amount}")
         
-        logger.info(f"Found {len(urls)} clean URLs for {state_name}")
-        
-        # Look for structured grant information
-        # Split by common separators and look for grant titles
-        sections = re.split(r'\n(?=#+|\d+\.|\*|\-)', ai_response)
-        
-        grant_count = 0
-        for section in sections:
-            if grant_count >= 5:  # Limit to 5 per state
-                break
+        # If no structured format found, fall back to parsing
+        if not opportunities:
+            logger.info(f"No structured format, parsing unstructured response for {state_name}")
+            
+            # Extract clean URLs from response
+            urls = []
+            url_patterns = [
+                r'https?://[^\s<>"\]\)]+',
+                r'\[([^\]]+)\]\((https?://[^\)]+)\)',
+            ]
+            
+            for pattern in url_patterns:
+                matches = re.findall(pattern, ai_response)
+                for match in matches:
+                    if isinstance(match, tuple):
+                        url = match[1] if match[1] else match[0]
+                    else:
+                        url = match
+                    url = url.rstrip('.,;!?)\]}')
+                    if url and url.startswith('http') and url not in urls:
+                        urls.append(url)
+            
+            # Look for grant names in the text
+            grant_patterns = [
+                r'(?:^|\n)(?:\d+\.\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative|Opportunity)[^.\n]*)',
+                r'(?:^|\n)(?:#+\s*)?([^.\n]*(?:Grant|Funding|Program|Initiative)[^.\n]*)',
+                r'(?:\*\*|##)\s*([^*\n]*(?:Grant|Funding|Program|Initiative)[^*\n]*)',
+            ]
+            
+            grant_titles = []
+            for pattern in grant_patterns:
+                matches = re.findall(pattern, ai_response, re.IGNORECASE | re.MULTILINE)
+                for match in matches:
+                    title = re.sub(r'^[\d\.\-\*\•\s#]+', '', match).strip()
+                    title = re.sub(r'\*+', '', title).strip()
+                    if 10 < len(title) < 120 and title not in grant_titles:
+                        grant_titles.append(title)
+            
+            # Create opportunities from found titles
+            for i, title in enumerate(grant_titles[:5]):
+                # Try to find amount in nearby text
+                amount = 'Amount TBD'
+                title_index = ai_response.find(title)
+                if title_index >= 0:
+                    nearby_text = ai_response[max(0, title_index-200):title_index+200]
+                    amount_match = re.search(r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|thousand|K))?', nearby_text)
+                    if amount_match:
+                        amount = amount_match.group(0)
                 
-            section = section.strip()
-            if len(section) < 30:  # Skip very short sections
-                continue
-            
-            # Look for grant/funding indicators
-            if not any(keyword in section.lower() for keyword in ['grant', 'funding', 'opportunity', 'rfp', 'program']):
-                continue
-            
-            # Extract grant title - look for patterns
-            title = None
-            title_patterns = [
-                r'(?:^|\n)(?:#+\s*)?([^.\n]+(?:Grant|Funding|Program|Initiative|Opportunity)[^.\n]*)',
-                r'(?:^|\n)(?:\d+\.\s*)?([^.\n]+(?:Grant|Funding|Program|Initiative)[^.\n]*)',
-                r'(?:^|\n)(?:\*\s*)?([^.\n]+(?:Grant|Funding|Program|Initiative)[^.\n]*)',
-            ]
-            
-            for pattern in title_patterns:
-                match = re.search(pattern, section, re.IGNORECASE | re.MULTILINE)
-                if match:
-                    title = match.group(1).strip()
-                    # Clean up title
-                    title = re.sub(r'^[\d\.\-\*\•\s#]+', '', title)
-                    title = re.sub(r'\s+', ' ', title)
-                    if len(title) > 10 and len(title) < 120:
-                        break
-            
-            if not title:
-                # Fallback: use first substantial line
-                lines = [line.strip() for line in section.split('\n') if line.strip()]
-                for line in lines:
-                    if len(line) > 15 and len(line) < 120:
-                        title = re.sub(r'^[\d\.\-\*\•\s#]+', '', line)
-                        break
-            
-            if not title or len(title) < 10:
-                continue
-            
-            # Extract deadline
-            deadline = 'Check website'
-            deadline_patterns = [
-                r'deadline[:\s]*([^.\n]+)',
-                r'due[:\s]*([^.\n]+)',
-                r'application[:\s]*due[:\s]*([^.\n]+)',
-                r'submit[:\s]*by[:\s]*([^.\n]+)'
-            ]
-            
-            for pattern in deadline_patterns:
-                match = re.search(pattern, section, re.IGNORECASE)
-                if match:
-                    deadline_text = match.group(1).strip()
-                    if deadline_text and len(deadline_text) < 80:
-                        deadline = deadline_text
-                        break
-            
-            # Extract amount with better patterns
-            amount = 'Amount TBD'
-            amount_patterns = [
-                r'\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|thousand|K))?',
-                r'(?:up\s*to|award\s*of|funding\s*of|total\s*of)\s*\$?[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|thousand|K))?',
-                r'[\d,]+(?:\.\d+)?\s*(?:million|M|billion|B|thousand|K)?\s*(?:dollar|USD|\$)'
-            ]
-            
-            for pattern in amount_patterns:
-                match = re.search(pattern, section, re.IGNORECASE)
-                if match:
-                    amount = match.group(0).strip()
-                    break
-            
-            # Find best matching URL for this opportunity
-            opportunity_url = ''
-            if urls:
-                # Try to find URL that matches the grant domain or is most relevant
-                for url in urls:
-                    if any(domain in url.lower() for domain in [state_name.lower().replace(' ', ''), 'edu', 'gov']):
-                        opportunity_url = url
-                        break
-                if not opportunity_url:
-                    opportunity_url = urls[0]  # Fallback to first URL
-            
-            opportunity = {
-                'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
-                'title': title,
-                'state': state_name,
-                'amount': amount,
-                'deadline': deadline,
-                'url': opportunity_url,
-                'tags': ['K-12', 'Education', 'AI-Discovered'],
-                'found_date': datetime.now().isoformat(),
-                'source': 'perplexity'
-            }
-            opportunities.append(opportunity)
-            grant_count += 1
-            logger.info(f"Found grant: {title[:50]}... - {state_name} - {amount}")
+                opportunity = {
+                    'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                    'title': title,
+                    'state': state_name,
+                    'amount': amount,
+                    'deadline': 'Check website',
+                    'url': urls[i] if i < len(urls) else (urls[0] if urls else ''),
+                    'tags': ['K-12', 'Education', 'AI-Discovered'],
+                    'found_date': datetime.now().isoformat(),
+                    'source': 'perplexity'
+                }
+                opportunities.append(opportunity)
+                logger.info(f"Parsed grant: {title[:50]}... - {amount}")
                     
         logger.info(f"Parsed {len(opportunities)} opportunities from Perplexity response for {state_name}")
         return opportunities[:5]  # Limit to top 5 opportunities per state
