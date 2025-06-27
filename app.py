@@ -41,18 +41,30 @@ EMAIL_CONFIG = {
 PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY', '')
 FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
 
-# Initialize AI clients
+# Initialize AI clients with proper error handling
 perplexity_client = None
 firecrawl_app = None
 
-if PERPLEXITY_API_KEY:
-    perplexity_client = OpenAI(
-        api_key=PERPLEXITY_API_KEY,
-        base_url="https://api.perplexity.ai"
-    )
+try:
+    if PERPLEXITY_API_KEY:
+        perplexity_client = OpenAI(
+            api_key=PERPLEXITY_API_KEY,
+            base_url="https://api.perplexity.ai"
+        )
+        logger.info("Perplexity client initialized successfully")
+    else:
+        logger.warning("PERPLEXITY_API_KEY not found")
+except Exception as e:
+    logger.error(f"Failed to initialize Perplexity client: {str(e)}")
 
-if FIRECRAWL_API_KEY:
-    firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+try:
+    if FIRECRAWL_API_KEY:
+        firecrawl_app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+        logger.info("Firecrawl client initialized successfully")
+    else:
+        logger.warning("FIRECRAWL_API_KEY not found")
+except Exception as e:
+    logger.error(f"Failed to initialize Firecrawl client: {str(e)}")
 
 # State DoE configurations - FIXED based on actual site analysis
 STATE_CONFIGS = {
@@ -223,18 +235,27 @@ def api_stats():
 @app.route('/health')
 def health_check():
     """Health check endpoint for monitoring"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'database': check_database_health(),
-        'scheduler': scheduler.running if scheduler else False,
-        'ai_services': {
-            'perplexity_configured': bool(PERPLEXITY_API_KEY),
-            'firecrawl_configured': bool(FIRECRAWL_API_KEY),
-            'perplexity_client_ready': bool(perplexity_client),
-            'firecrawl_app_ready': bool(firecrawl_app)
-        }
-    })
+    try:
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'database': check_database_health(),
+            'scheduler': scheduler.running if scheduler else False,
+            'version': '2.1',
+            'ai_services': {
+                'perplexity_api_key_set': bool(PERPLEXITY_API_KEY),
+                'firecrawl_api_key_set': bool(FIRECRAWL_API_KEY),
+                'perplexity_client_ready': perplexity_client is not None,
+                'firecrawl_app_ready': firecrawl_app is not None
+            }
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/scrape', methods=['POST'])
 def manual_scrape():
@@ -695,13 +716,8 @@ def enhance_opportunity_with_firecrawl(opportunity):
         
         # Use Firecrawl to scrape the URL and extract structured data
         result = firecrawl_app.scrape_url(
-            opportunity['url'], 
-            params={
-                'formats': ['markdown', 'html'],
-                'includeTags': ['h1', 'h2', 'h3', 'p', 'li', 'strong'],
-                'excludeTags': ['nav', 'footer', 'header', 'script', 'style'],
-                'waitFor': 2000
-            }
+            opportunity['url'],
+            formats=['markdown', 'html']
         )
         
         if result and result.get('markdown'):
