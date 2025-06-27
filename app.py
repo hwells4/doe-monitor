@@ -35,57 +35,68 @@ EMAIL_CONFIG = {
     'sender_password': os.environ.get('SENDER_PASSWORD', '')
 }
 
-# State DoE configurations
+# State DoE configurations - FIXED based on actual site analysis
 STATE_CONFIGS = {
     'TX': {
         'name': 'Texas',
         'url': 'https://tea.texas.gov/finance-and-grants/grants',
-        'selector': '.page-content a'
+        'selectors': ['.field--name-body a', '.sectional-box a', 'strong a', '.field--type-text-with-summary a'],
+        'status': 'active'
     },
     'CA': {
         'name': 'California', 
-        'url': 'https://www.cde.ca.gov/fg/fo/',
-        'selector': 'table a'
+        'url': 'https://www.cde.ca.gov/fg/',
+        'selectors': ['main a', '.content a'],
+        'status': 'captcha_protected',  # Needs Firecrawl
+        'note': 'Protected by Radware anti-bot system'
     },
     'FL': {
         'name': 'Florida',
-        'url': 'https://www.fldoe.org/finance/grants/',
-        'selector': '.content a'
+        'url': 'https://www.fldoe.org/finance/contracts-grants-procurement/grants-management/',
+        'selectors': ['.sectional-box a', '.col a', 'main a'],
+        'status': 'active'
     },
     'NY': {
         'name': 'New York',
-        'url': 'http://www.nysed.gov/grants',
-        'selector': '.content-area a'
+        'url': 'https://www.nysed.gov/funding-opportunities',
+        'selectors': ['.content-area a', 'main a', 'article a'],
+        'status': 'needs_verification'
     },
     'IL': {
         'name': 'Illinois',
         'url': 'https://www.isbe.net/Pages/Grants.aspx',
-        'selector': '.ms-rtestate-field a'
+        'selectors': ['.ms-rtestate-field a', 'main a', '.content a'],
+        'status': 'needs_verification'
     },
     'PA': {
         'name': 'Pennsylvania',
         'url': 'https://www.education.pa.gov/Teachers%20-%20Administrators/Pages/Grant-Opportunities.aspx',
-        'selector': '.ms-rtestate-field a'
+        'selectors': ['.ms-rtestate-field a', 'main a', '.content a'],
+        'status': 'needs_verification'
     },
     'OH': {
         'name': 'Ohio',
         'url': 'https://education.ohio.gov/Topics/Finance-and-Funding/School-Funding/Grant-Opportunities',
-        'selector': '.content a'
+        'selectors': ['.content a', 'main a', 'article a'],
+        'status': 'needs_verification'
     },
     'GA': {
         'name': 'Georgia',
         'url': 'https://www.gadoe.org/External-Affairs-and-Policy/communications/Pages/PressReleaseDetails.aspx',
-        'selector': '.content a'
+        'selectors': ['.content a', 'main a', 'article a'],
+        'status': 'needs_verification'
     },
     'NC': {
         'name': 'North Carolina',
         'url': 'https://www.dpi.nc.gov/districts-schools/federal-program-monitoring/grants-funding',
-        'selector': '.field-content a'
+        'selectors': ['.field-content a', 'main a', '.content a'],
+        'status': 'needs_verification'
     },
     'MI': {
         'name': 'Michigan',
         'url': 'https://www.michigan.gov/mde/services/grants',
-        'selector': '.page-content a'
+        'selectors': ['.page-content a', 'main a', '.content a'],
+        'status': 'needs_verification'
     }
 }
 
@@ -325,52 +336,163 @@ def extract_dollar_amount(text):
     return None
 
 def scrape_opportunities(state_code):
-    """Scrape opportunities from a state DoE site"""
+    """FIXED: Scrape opportunities from a state DoE site with proper selectors and error handling"""
     if state_code not in STATE_CONFIGS:
+        logger.error(f"No configuration found for state: {state_code}")
         return []
     
     config = STATE_CONFIGS[state_code]
     opportunities = []
     
+    # Skip states that need special handling
+    if config.get('status') == 'captcha_protected':
+        logger.warning(f"Skipping {config['name']} - requires Firecrawl or similar tool ({config.get('note', '')})")
+        return []
+    
     try:
-        response = requests.get(config['url'], timeout=30,
-                              headers={'User-Agent': 'Mozilla/5.0 (Educational Funding Monitor)'})
+        # Better headers to avoid bot detection
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
+        logger.info(f"Scraping {config['name']} from {config['url']}")
+        response = requests.get(config['url'], timeout=30, headers=headers, allow_redirects=True)
+        
+        # Handle common error cases
+        if response.status_code == 404:
+            logger.error(f"404 Error for {config['name']} - URL may be outdated: {config['url']}")
+            return []
+        
+        if response.status_code != 200:
+            logger.error(f"HTTP {response.status_code} for {config['name']}: {config['url']}")
+            return []
+        
+        # Check for captcha or bot protection
+        if 'captcha' in response.text.lower() or 'radware' in response.text.lower() or 'bot' in response.text.lower():
+            logger.warning(f"Bot protection detected for {config['name']}, skipping")
+            return []
+        
         soup = BeautifulSoup(response.content, 'html.parser')
-        links = soup.select(config['selector'])[:10]  # Limit to 10 per state
         
-        keywords = ['math', 'mathematics', 'stem', 'k-12', 'elementary', 'middle', 'high school']
+        # Try multiple selectors - use the config's selectors array
+        all_links = []
+        selectors = config.get('selectors', [config.get('selector', 'a')])  # Fallback to old format
+        if isinstance(selectors, str):
+            selectors = [selectors]  # Convert single selector to list
         
-        for link in links:
+        for selector in selectors:
+            try:
+                links = soup.select(selector)
+                if links:
+                    logger.info(f"Selector '{selector}' found {len(links)} links for {config['name']}")
+                    all_links.extend(links)
+                    break  # Use first selector that finds links
+            except Exception as selector_error:
+                logger.warning(f"Selector '{selector}' failed for {config['name']}: {str(selector_error)}")
+                continue
+        
+        if not all_links:
+            logger.warning(f"No links found with any selector for {config['name']}")
+            return []
+        
+        # Remove duplicates while preserving order
+        seen_hrefs = set()
+        unique_links = []
+        for link in all_links:
+            href = link.get('href', '')
+            if href and href not in seen_hrefs:
+                seen_hrefs.add(href)
+                unique_links.append(link)
+        
+        logger.info(f"Found {len(unique_links)} unique links for {config['name']}")
+        
+        # FIXED: Much broader keyword matching - not just math/stem
+        keywords = [
+            'grant', 'grants', 'funding', 'opportunity', 'opportunities', 
+            'rfp', 'solicitation', 'application', 'apply', 'award', 'awards',
+            'competitive', 'program', 'programs', 'k-12', 'education', 
+            'school', 'district', 'teacher', 'student', 'math', 'mathematics', 
+            'stem', 'science', 'elementary', 'middle', 'high school', 'literacy',
+            'professional development', 'curriculum', 'technology', 'digital'
+        ]
+        
+        grant_related_links = []
+        for link in unique_links[:50]:  # Process up to 50 links
             text = link.get_text(strip=True)
             href = link.get('href', '')
             
-            # Check if relevant
-            if any(keyword in text.lower() for keyword in keywords):
-                # Generate unique ID
-                opp_id = f"{state_code}_{hash(text)}_{datetime.now().strftime('%Y%m%d')}"
-                
-                # Extract or estimate amount
-                amount = extract_dollar_amount(text) or 'Amount TBD'
-                if isinstance(amount, (int, float)):
-                    amount = f"${amount:,.0f}"
-                
-                # Make absolute URL
-                if href and not href.startswith('http'):
-                    href = requests.compat.urljoin(config['url'], href)
-                
-                opportunities.append({
-                    'id': opp_id,
-                    'title': text[:100],  # Limit title length
-                    'state': config['name'],
-                    'amount': amount,
-                    'deadline': 'Check website',  # Would need deeper scraping
-                    'url': href,
-                    'tags': ['K-12', 'Mathematics'],  # Simplified for demo
-                    'found_date': datetime.now().isoformat()
-                })
-                
+            # Skip very short or empty links
+            if not text or len(text) < 5:
+                continue
+            
+            # Check if grant-related (much broader matching)
+            text_lower = text.lower()
+            href_lower = href.lower()
+            
+            if any(keyword in text_lower or keyword in href_lower for keyword in keywords):
+                grant_related_links.append(link)
+        
+        logger.info(f"Found {len(grant_related_links)} grant-related links for {config['name']}")
+        
+        # Process grant-related links into opportunities
+        for link in grant_related_links[:20]:  # Limit to 20 per state
+            text = link.get_text(strip=True)
+            href = link.get('href', '')
+            
+            # Make absolute URL
+            if href and not href.startswith('http'):
+                href = requests.compat.urljoin(config['url'], href)
+            
+            # Skip invalid URLs
+            if not href or href.startswith('#') or href.startswith('javascript:'):
+                continue
+            
+            # Generate unique ID
+            import hashlib
+            text_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+            opp_id = f"{state_code}_{text_hash}_{datetime.now().strftime('%Y%m%d')}"
+            
+            # Extract or estimate amount
+            amount = extract_dollar_amount(text) or 'Amount TBD'
+            if isinstance(amount, (int, float)):
+                amount = f"${amount:,.0f}"
+            
+            # Better tag assignment based on content
+            tags = ['Education']
+            text_lower = text.lower()
+            if any(word in text_lower for word in ['k-12', 'elementary', 'middle', 'secondary', 'school']):
+                tags.append('K-12')
+            if any(word in text_lower for word in ['stem', 'math', 'science', 'technology']):
+                tags.append('STEM')
+            if any(word in text_lower for word in ['teacher', 'professional development', 'training']):
+                tags.append('Professional Development')
+            
+            opportunities.append({
+                'id': opp_id,
+                'title': text[:200],  # Allow longer titles
+                'state': config['name'],
+                'amount': amount,
+                'deadline': 'Check website for deadline',
+                'url': href,
+                'tags': tags,
+                'found_date': datetime.now().isoformat()
+            })
+            
+            logger.info(f"Added opportunity: {text[:50]}...")
+        
+        logger.info(f"Successfully scraped {len(opportunities)} opportunities from {config['name']}")
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error scraping {config['name']}: {str(e)}")
     except Exception as e:
-        logger.error(f"Error scraping {state_code}: {str(e)}")
+        logger.error(f"Unexpected error scraping {config['name']}: {str(e)}")
+        import traceback
+        traceback.print_exc()
     
     return opportunities
 
