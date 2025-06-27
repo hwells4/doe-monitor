@@ -279,10 +279,10 @@ def manual_scrape():
 def test_ai_scrape(state_code):
     """Test AI-powered scraping for a specific state"""
     try:
-        if not perplexity_client or not firecrawl_app:
+        if not perplexity_client and not firecrawl_app:
             return jsonify({
                 'success': False,
-                'error': 'AI services not configured. Please set PERPLEXITY_API_KEY and FIRECRAWL_API_KEY environment variables.'
+                'error': 'No AI services available. At least one of Perplexity or Firecrawl must be configured.'
             }), 400
         
         if state_code.upper() not in STATE_CONFIGS:
@@ -291,7 +291,13 @@ def test_ai_scrape(state_code):
                 'error': f'State {state_code} not supported. Available: {list(STATE_CONFIGS.keys())}'
             }), 400
         
-        opportunities = ai_powered_scrape_opportunities(state_code.upper())
+        # Try AI scraping with detailed error reporting
+        try:
+            opportunities = ai_powered_scrape_opportunities(state_code.upper())
+        except Exception as ai_error:
+            # Fallback to traditional scraping
+            logger.warning(f"AI scraping failed, falling back to traditional: {str(ai_error)}")
+            opportunities = scrape_opportunities(state_code.upper())
         
         return jsonify({
             'success': True,
@@ -300,7 +306,9 @@ def test_ai_scrape(state_code):
             'opportunities': opportunities[:3],  # Return first 3 for preview
             'ai_services': {
                 'perplexity_enabled': bool(perplexity_client),
-                'firecrawl_enabled': bool(firecrawl_app)
+                'firecrawl_enabled': bool(firecrawl_app),
+                'perplexity_api_key_set': bool(PERPLEXITY_API_KEY),
+                'firecrawl_api_key_set': bool(FIRECRAWL_API_KEY)
             }
         })
         
