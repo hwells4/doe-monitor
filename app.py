@@ -218,7 +218,7 @@ def api_opportunities():
     """Get latest funding opportunities with filtering and pagination"""
     try:
         # Get query parameters
-        state = request.args.get('state', '').upper()
+        state = request.args.get('state', '')
         offset = int(request.args.get('offset', 0))
         limit = int(request.args.get('limit', 10))
         
@@ -1333,9 +1333,9 @@ def send_email(to_email, subject, html_body):
 # Initialize database on startup
 init_db()
 
-# Schedule daily checks (9 AM)
+# Schedule twice-weekly checks (Tuesdays and Fridays at 9 AM)
 if not app.debug:  # Only in production
-    scheduler.add_job(check_all_states, 'cron', hour=9, minute=0)
+    scheduler.add_job(check_all_states, 'cron', day_of_week='tue,fri', hour=9, minute=0)
     scheduler.start()
 
 if __name__ == '__main__':

@@ -202,10 +202,7 @@ async function loadOpportunities(reset = false) {
             if (data.opportunities.length === 0 && currentOffset === 0) {
                 container.innerHTML = `
                     <div id="noOpportunitiesMessage" style="text-align: center; margin: 20px 0;">
-                        <p style="color: #666; margin-bottom: 20px;">No opportunities found for the selected filter.</p>
-                        <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
-                            🔍 Scan for Opportunities Now
-                        </button>
+                        <p style="color: #666;">No opportunities found for the selected filter. New opportunities are automatically scanned every Tuesday & Friday.</p>
                     </div>
                 `;
             } else {

@@ -9,7 +9,7 @@
 
     <div class="stats">
         <div class="stat-card">
-            <div class="stat-number">${{ stats.total_funding if stats else '$47M+' }}</div>
+            <div class="stat-number">{{ stats.total_funding if stats else '$47M+' }}</div>
             <div class="stat-label">Available This Month</div>
         </div>
         <div class="stat-card">
@@ -24,7 +24,10 @@
 
     <div class="recent-opportunities">
         <div class="opportunities-header">
-            <h3>Recent Opportunities Found</h3>
+            <div>
+                <h3>Recent Opportunities Found</h3>
+                <p style="color: #666; font-size: 0.9rem; margin: 5px 0 0 0;">📅 Automatically updated every Tuesday & Friday at 9 AM</p>
+            </div>
             <div class="filter-controls">
                 <select id="stateFilter" onchange="filterByState()">
                     <option value="ALL">All States</option>
@@ -36,10 +39,7 @@
         <div id="opportunitiesContainer">
             {% if opportunities|length == 0 %}
             <div id="noOpportunitiesMessage" style="text-align: center; margin: 20px 0;">
-                <p style="color: #666; margin-bottom: 20px;">No opportunities found yet. Click below to scan state websites:</p>
-                <button onclick="triggerScrape()" class="submit-btn" style="width: auto; padding: 12px 30px;">
-                    🔍 Scan for Opportunities Now
-                </button>
+                <p style="color: #666;">No opportunities found for the selected filter. New opportunities are automatically scanned every Tuesday & Friday.</p>
             </div>
             {% endif %}
         </div>
@@ -147,6 +147,7 @@
     <div class="footer">
         <p>Built by Harrison from Dodo Digital as a preview of our automation capabilities</p>
         <p>No spam, no fees, just funding opportunities for eMath</p>
+        <p style="margin-top: 15px; font-size: 0.85rem; color: #888;">🔄 Opportunities are automatically scanned from state websites every Tuesday & Friday at 9:00 AM</p>
     </div>
 </div>
 {% endblock %}
