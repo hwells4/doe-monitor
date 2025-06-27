@@ -769,7 +769,8 @@ def parse_perplexity_response(ai_response, state_name, state_code):
     
     try:
         logger.info(f"Parsing Perplexity response for {state_name}. Response length: {len(ai_response)}")
-        logger.info(f"Response preview: {ai_response[:300]}...")
+        logger.info(f"Response preview: {ai_response[:500]}...")
+        logger.info(f"Full response: {ai_response}")
         
         # First, try to parse structured format (TITLE:, AMOUNT:, etc.)
         structured_matches = re.findall(
@@ -783,19 +784,24 @@ def parse_perplexity_response(ai_response, state_name, state_code):
                 if title and len(title.strip()) > 5:
                     # Clean and validate URL
                     clean_url = clean_extracted_url(url.strip())
-                    opportunity = {
-                        'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
-                        'title': title.strip(),
-                        'state': state_name,
-                        'amount': amount.strip() if amount.strip() else 'Amount TBD',
-                        'deadline': deadline.strip() if deadline.strip() else 'Check website',
-                        'url': clean_url,
-                        'tags': ['K-12', 'Education', 'AI-Discovered'],
-                        'found_date': datetime.now().isoformat(),
-                        'source': 'perplexity'
-                    }
-                    opportunities.append(opportunity)
-                    logger.info(f"Structured grant: {title[:50]}... - URL: {clean_url}")
+                    
+                    # Only add opportunities with valid URLs
+                    if clean_url and clean_url.startswith('http'):
+                        opportunity = {
+                            'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                            'title': title.strip(),
+                            'state': state_name,
+                            'amount': amount.strip() if amount.strip() else 'Amount TBD',
+                            'deadline': deadline.strip() if deadline.strip() else 'Check website',
+                            'url': clean_url,
+                            'tags': ['K-12', 'Education', 'AI-Discovered'],
+                            'found_date': datetime.now().isoformat(),
+                            'source': 'perplexity'
+                        }
+                        opportunities.append(opportunity)
+                        logger.info(f"Structured grant: {title[:50]}... - URL: {clean_url}")
+                    else:
+                        logger.warning(f"Skipping structured grant '{title[:50]}...' - no valid URL (URL: '{url.strip()}')")
         
         # If no structured format found, fall back to parsing
         if not opportunities:
@@ -827,19 +833,23 @@ def parse_perplexity_response(ai_response, state_name, state_code):
                 elif urls:
                     assigned_url = urls[0]  # Use first URL as fallback
                 
-                opportunity = {
-                    'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
-                    'title': title,
-                    'state': state_name,
-                    'amount': amount,
-                    'deadline': 'Check website',
-                    'url': assigned_url,
-                    'tags': ['K-12', 'Education', 'AI-Discovered'],
-                    'found_date': datetime.now().isoformat(),
-                    'source': 'perplexity'
-                }
-                opportunities.append(opportunity)
-                logger.info(f"Parsed grant: {title[:50]}... - URL: {assigned_url[:50]}...")
+                # Only add opportunities that have valid URLs
+                if assigned_url and assigned_url.startswith('http'):
+                    opportunity = {
+                        'id': f"{state_code}_perplexity_{hash(title)}_{datetime.now().strftime('%Y%m%d')}",
+                        'title': title,
+                        'state': state_name,
+                        'amount': amount,
+                        'deadline': 'Check website',
+                        'url': assigned_url,
+                        'tags': ['K-12', 'Education', 'AI-Discovered'],
+                        'found_date': datetime.now().isoformat(),
+                        'source': 'perplexity'
+                    }
+                    opportunities.append(opportunity)
+                    logger.info(f"Parsed grant: {title[:50]}... - URL: {assigned_url}")
+                else:
+                    logger.warning(f"Skipping grant '{title[:50]}...' - no valid URL found (URL: '{assigned_url}')")
                     
         logger.info(f"Parsed {len(opportunities)} opportunities from Perplexity response for {state_name}")
         return opportunities[:5]  # Limit to top 5 opportunities per state
@@ -927,8 +937,15 @@ def ai_powered_scrape_opportunities(state_code):
     opportunities = discover_opportunities_with_perplexity(state_name, state_code)
     
     if not opportunities:
-        logger.warning(f"No opportunities discovered by Perplexity for {state_name}")
-        return []
+        logger.warning(f"No opportunities with valid URLs discovered by Perplexity for {state_name}")
+        logger.info(f"Attempting traditional scraping as fallback for {state_name}")
+        # Fallback to traditional scraping for this state
+        opportunities = scrape_opportunities(state_code)
+        if opportunities:
+            logger.info(f"Traditional scraping found {len(opportunities)} opportunities for {state_name}")
+        else:
+            logger.warning(f"Both AI and traditional scraping failed for {state_name}")
+            return []
     
     # Step 2: Enhance each opportunity with Firecrawl (if URL available)
     enhanced_opportunities = []
