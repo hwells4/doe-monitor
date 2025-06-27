@@ -743,6 +743,18 @@ def discover_opportunities_with_perplexity(state_name, state_code):
                 max_tokens=2000
             )
             ai_response = response.choices[0].message.content
+            
+            # Extract sources/citations from Perplexity response
+            sources = []
+            if hasattr(response, 'search_results') and response.search_results:
+                sources = [result.get('url', '') for result in response.search_results if result.get('url')]
+                logger.info(f"Found {len(sources)} sources from Perplexity: {sources}")
+            elif hasattr(response, 'citations') and response.citations:
+                sources = response.citations
+                logger.info(f"Found {len(sources)} citations from Perplexity: {sources}")
+            else:
+                logger.warning(f"No search_results or citations found in Perplexity response for {state_name}")
+                logger.info(f"Full response object keys: {list(response.__dict__.keys()) if hasattr(response, '__dict__') else 'No __dict__'}")
         else:
             # PerplexiPy format - try different method calls
             try:
@@ -755,7 +767,7 @@ def discover_opportunities_with_perplexity(state_name, state_code):
         logger.info(f"Perplexity response for {state_name}: {ai_response[:200]}...")
         
         # Parse the AI response to extract structured opportunity data
-        opportunities = parse_perplexity_response(ai_response, state_name, state_code)
+        opportunities = parse_perplexity_response(ai_response, state_name, state_code, sources if 'sources' in locals() else [])
         
         return opportunities
         
@@ -763,7 +775,7 @@ def discover_opportunities_with_perplexity(state_name, state_code):
         logger.error(f"Perplexity discovery error for {state_name}: {str(e)}")
         return []
 
-def parse_perplexity_response(ai_response, state_name, state_code):
+def parse_perplexity_response(ai_response, state_name, state_code, sources=[]):
     """Parse Perplexity response to extract structured opportunity data"""
     opportunities = []
     
@@ -771,6 +783,7 @@ def parse_perplexity_response(ai_response, state_name, state_code):
         logger.info(f"Parsing Perplexity response for {state_name}. Response length: {len(ai_response)}")
         logger.info(f"Response preview: {ai_response[:500]}...")
         logger.info(f"Full response: {ai_response}")
+        logger.info(f"Perplexity sources provided: {len(sources)} - {sources}")
         
         # First, try to parse structured format (TITLE:, AMOUNT:, etc.)
         structured_matches = re.findall(
@@ -807,9 +820,20 @@ def parse_perplexity_response(ai_response, state_name, state_code):
         if not opportunities:
             logger.info(f"No structured format, parsing unstructured response for {state_name}")
             
-            # Extract clean URLs from response with improved patterns
-            urls = extract_urls_from_text(ai_response)
-            logger.info(f"Extracted {len(urls)} URLs from response")
+            # Combine Perplexity sources with extracted URLs, prioritizing sources
+            all_urls = []
+            
+            # First priority: Perplexity sources (these are the most reliable)
+            if sources:
+                all_urls.extend([url for url in sources if url and url.startswith('http')])
+                logger.info(f"Added {len([url for url in sources if url and url.startswith('http')])} URLs from Perplexity sources")
+            
+            # Second priority: URLs extracted from response text
+            extracted_urls = extract_urls_from_text(ai_response)
+            for url in extracted_urls:
+                if url not in all_urls:
+                    all_urls.append(url)
+            logger.info(f"Total URLs available: {len(all_urls)} (Sources: {len(sources)}, Extracted: {len(extracted_urls)})")
             
             # Look for grant names in the text with improved patterns
             grant_titles = extract_grant_titles_from_text(ai_response)
@@ -826,12 +850,12 @@ def parse_perplexity_response(ai_response, state_name, state_code):
                     if amount_match:
                         amount = amount_match.group(0)
                 
-                # Assign URL if available
+                # Assign URL if available - prioritize Perplexity sources
                 assigned_url = ''
-                if i < len(urls):
-                    assigned_url = urls[i]
-                elif urls:
-                    assigned_url = urls[0]  # Use first URL as fallback
+                if i < len(all_urls):
+                    assigned_url = all_urls[i]
+                elif all_urls:
+                    assigned_url = all_urls[0]  # Use first URL as fallback
                 
                 # Only add opportunities that have valid URLs
                 if assigned_url and assigned_url.startswith('http'):
